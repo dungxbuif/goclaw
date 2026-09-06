@@ -179,7 +179,7 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
-	github.com/dungxbuif/mezon-sdk-go v0.0.0-20260906194252-55ed3f2855f3
+	github.com/dungxbuif/mezon-sdk-go v0.0.0-20260906234750-248767c54918
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

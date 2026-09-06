@@ -16,6 +16,13 @@ All notable changes to GoClaw are documented here. For full documentation, see [
 
 ### Added
 
+- **Mezon channel via `mezon-sdk-go`** — Adds first-class Mezon bot support for
+  config/env and encrypted DB-backed channel instances. Includes DM/group policy,
+  pairing, @mention gating, pending group history, tenant/agent routing, graceful
+  lifecycle cancellation, safe long-message chunking, CLI onboarding, HTTP/WS/MCP
+  validation, and Web Dashboard schemas. Outbound media is intentionally reported
+  unsupported until the SDK provides a complete upload transport.
+
 - **Behavior UX sidecar delivery overrides** — Adds sidecar-generated Quick
   Acknowledgement and Intermediate Replies with provider/model, timeout, token,
   and char caps. Effective config resolves Channel > Agent > Workspace, with

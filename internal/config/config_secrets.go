@@ -47,6 +47,7 @@ func (c *Config) MaskedCopy() *Config {
 	// Mask channel secrets
 	maskNonEmpty(&cp.Channels.Telegram.Token)
 	maskNonEmpty(&cp.Channels.Discord.Token)
+	maskNonEmpty(&cp.Channels.Mezon.Token)
 	maskNonEmpty(&cp.Channels.Slack.BotToken)
 	maskNonEmpty(&cp.Channels.Slack.AppToken)
 	maskNonEmpty(&cp.Channels.Zalo.Token)
@@ -97,6 +98,7 @@ func (c *Config) StripSecrets() {
 	// Channel secrets
 	c.Channels.Telegram.Token = ""
 	c.Channels.Discord.Token = ""
+	c.Channels.Mezon.Token = ""
 	c.Channels.Slack.BotToken = ""
 	c.Channels.Slack.AppToken = ""
 	c.Channels.Zalo.Token = ""
@@ -152,6 +154,7 @@ func (c *Config) StripMaskedSecrets() {
 	// Channel secrets
 	stripIfMasked(&c.Channels.Telegram.Token)
 	stripIfMasked(&c.Channels.Discord.Token)
+	stripIfMasked(&c.Channels.Mezon.Token)
 	stripIfMasked(&c.Channels.Slack.BotToken)
 	stripIfMasked(&c.Channels.Slack.AppToken)
 	stripIfMasked(&c.Channels.Zalo.Token)

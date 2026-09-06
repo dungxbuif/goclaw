@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { configSchema } from "./channel-schemas";
+import { configSchema, credentialsSchema } from "./channel-schemas";
 import { deliveryModelKey, isDeliveryModelKey, isDeliveryProviderKey } from "./channel-delivery-provider-fields";
 import { normalizeReasoningDeliveryConfig, resolveReasoningDeliveryValue } from "./reasoning-delivery-config";
 
@@ -81,6 +81,23 @@ describe("discord configSchema", () => {
     expect(historyLimit).toBeDefined();
     expect(historyLimit!.defaultValue).toBe(200);
     expect(historyLimit!.help).toMatch(/0 = disabled/i);
+  });
+});
+
+describe("mezon channel schema", () => {
+  it("requires bot ID and token credentials", () => {
+    expect(credentialsSchema.mezon?.map((field) => [field.key, field.required])).toEqual([
+      ["bot_id", true],
+      ["token", true],
+    ]);
+  });
+
+  it("exposes secure policy and history controls", () => {
+    const fields = configSchema.mezon!;
+    expect(fields.find((field) => field.key === "dm_policy")?.defaultValue).toBe("pairing");
+    expect(fields.find((field) => field.key === "group_policy")?.defaultValue).toBe("pairing");
+    expect(fields.find((field) => field.key === "require_mention")?.defaultValue).toBe(true);
+    expect(fields.find((field) => field.key === "history_limit")?.defaultValue).toBe(200);
   });
 });
 

@@ -870,8 +870,17 @@ The bot app must have the `imbot` scope granted. The `disk` scope is **not** req
 | Module | Path | Purpose |
 |---|---|---|
 | Channel core | `internal/channels/` | `Channel` interface, `BaseChannel` (incl. `HandleMessageMedia()` method), `Manager` (StartAll/StopAll), outbound dispatcher, DB instance loader |
-| Platform adapters | `internal/channels/{telegram,feishu,discord,slack,whatsapp,zalo,bitrix24}/` | Per-platform: message handling, formatting, streaming, reactions, media, pairing |
+| Platform adapters | `internal/channels/{telegram,feishu,discord,mezon,slack,whatsapp,zalo,bitrix24}/` | Per-platform: message handling, formatting, streaming, reactions, media, pairing |
 | Bitrix24 media | `internal/channels/bitrix24/download.go`, `send_media.go` | Inbound file download via `imbot.v2.File.download`, outbound upload via `imbot.v2.File.upload` |
+
+---
+
+## 17. Mezon
+
+The Mezon adapter uses `github.com/dungxbuif/mezon-sdk-go` and the realtime
+gateway. It supports config-based startup and encrypted `channel_instances`
+credentials. See [Mezon channel](mezon-channel.md) for configuration, policy,
+routing, lifecycle, and current media limitations.
 | Audio / STT | `internal/audio/` | Audio manager, STT chain resolution, legacy STT bridge |
 | Pairing & routing | `internal/store/pg/pairing.go`, `cmd/gateway_consumer.go` | Pairing code persistence, inbound message routing and cancel interception |
 

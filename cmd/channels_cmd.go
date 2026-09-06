@@ -95,6 +95,7 @@ func runChannelsAdd() {
 	typeOptions := []SelectOption[string]{
 		{"Telegram", "telegram"},
 		{"Discord", "discord"},
+		{"Mezon", "mezon"},
 		{"Slack", "slack"},
 	}
 	channelType, err := promptSelect("Channel type", typeOptions, 0)
@@ -122,6 +123,19 @@ func runChannelsAdd() {
 		creds["token"] = token
 	case "discord":
 		token, err := promptPassword("Bot token", "from Discord Developer Portal")
+		if err != nil || token == "" {
+			fmt.Println("Cancelled.")
+			return
+		}
+		creds["token"] = token
+	case "mezon":
+		botID, err := promptString("Bot ID", "from Mezon Developer Portal", "")
+		if err != nil || botID == "" {
+			fmt.Println("Cancelled.")
+			return
+		}
+		creds["bot_id"] = botID
+		token, err := promptPassword("Bot token", "from Mezon Developer Portal")
 		if err != nil || token == "" {
 			fmt.Println("Cancelled.")
 			return

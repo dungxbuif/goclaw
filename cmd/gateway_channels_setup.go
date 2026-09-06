@@ -14,6 +14,7 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/channels"
 	"github.com/nextlevelbuilder/goclaw/internal/channels/discord"
 	"github.com/nextlevelbuilder/goclaw/internal/channels/feishu"
+	mezonchannel "github.com/nextlevelbuilder/goclaw/internal/channels/mezon"
 	slackchannel "github.com/nextlevelbuilder/goclaw/internal/channels/slack"
 	"github.com/nextlevelbuilder/goclaw/internal/channels/telegram"
 	"github.com/nextlevelbuilder/goclaw/internal/channels/whatsapp"
@@ -67,6 +68,24 @@ func registerConfigChannels(cfg *config.Config, channelMgr *channels.Manager, ms
 		} else {
 			channelMgr.RegisterChannel(channels.TypeDiscord, dc)
 			slog.Info("discord channel enabled (config)")
+		}
+	}
+
+	if cfg.Channels.Mezon.Enabled {
+		switch {
+		case cfg.Channels.Mezon.BotID == "":
+			recordMissingConfig(channels.TypeMezon, "Set channels.mezon.bot_id in config.")
+		case cfg.Channels.Mezon.Token == "":
+			recordMissingConfig(channels.TypeMezon, "Set channels.mezon.token in config.")
+		default:
+			mz, err := mezonchannel.New(cfg.Channels.Mezon, msgBus, pgStores.Pairing, pgStores.PendingMessages)
+			if err != nil {
+				channelMgr.RecordFailure(channels.TypeMezon, "", err)
+				slog.Error("failed to initialize mezon channel", "error", err)
+			} else {
+				channelMgr.RegisterChannel(channels.TypeMezon, mz)
+				slog.Info("mezon channel enabled (config)")
+			}
 		}
 	}
 

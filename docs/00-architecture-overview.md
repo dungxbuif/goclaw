@@ -297,7 +297,7 @@ sequenceDiagram
 
     GW->>Engine: 17. Create gateway server (WS + HTTP)
     GW->>Engine: 18. Register RPC methods
-    GW->>Engine: 19. Register + start channels (Telegram, Discord, Feishu, Zalo, WhatsApp)
+    GW->>Engine: 19. Register + start channels (Telegram, Discord, Mezon, Feishu, Zalo, WhatsApp)
     GW->>Engine: 20. Start cron, scheduler (4 lanes)
     GW->>Engine: 21. Start skills watcher + inbound consumer
     GW->>Engine: 22. Listen on host:port

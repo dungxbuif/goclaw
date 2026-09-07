@@ -16,6 +16,30 @@ All notable changes to GoClaw are documented here. For full documentation, see [
 
 ### Added
 
+- **Scoped Discord/Mezon channel catalog** — Adds the read-only
+  `channel_catalog` tool for listing and exactly resolving channels within the
+  current inbound guild or clan. Results include hierarchy, kind, and
+  evidence-backed bot capabilities; Discord honors effective permissions and
+  Mezon advertises only adapter-supported operations. Refreshes are serialized
+  per container and protected by a five-second cooldown.
+- **Mezon edit, reaction, and delete-own operations** — Extends the generic
+  `message` tool with bot-owned deletion and exposes Mezon's SDK-backed edit and
+  reaction actions. Message IDs now remain strings through tool and channel
+  boundaries, preventing precision loss for 64-bit snowflakes.
+- **Mezon interactive cards and replies** — Adds a clan-scoped
+  `mezon_interactive` tool with native button rows, input/textarea, select,
+  radio/multi-choice, date-picker, and animation components. Button clicks and
+  dropdown selections are converted to policy-checked inbound user turns so
+  the bot replies to the interaction in the same clan channel. DM, unknown-clan,
+  and self-generated interaction events fail closed.
+
+- **Mezon channel via `mezon-sdk-go`** — Adds first-class Mezon bot support for
+  config/env and encrypted DB-backed channel instances. Includes DM/group policy,
+  pairing, @mention gating, pending group history, tenant/agent routing, graceful
+  lifecycle cancellation, safe long-message chunking, CLI onboarding, HTTP/WS/MCP
+  validation, and Web Dashboard schemas. Outbound media is intentionally reported
+  unsupported until the SDK provides a complete upload transport.
+
 - **Behavior UX sidecar delivery overrides** — Adds sidecar-generated Quick
   Acknowledgement and Intermediate Replies with provider/model, timeout, token,
   and char caps. Effective config resolves Channel > Agent > Workspace, with
@@ -75,6 +99,15 @@ All notable changes to GoClaw are documented here. For full documentation, see [
   for provider-first model selection.
 
 ### Fixed
+
+- **Mezon cross-clan outbound isolation** — Propagates the authenticated inbound
+  clan through run context and rejects model-triggered sends or updates whose
+  destination channel belongs to another clan. Clan/group deliveries without a
+  trusted source clan now fail closed; production deployments can use
+  `dm_policy: disabled` for clan-only behavior.
+- **Bot message ownership enforcement** — Mezon edit/delete now fail closed when
+  the target message is missing, has unknown ownership, or belongs to another
+  sender.
 
 - **Quick Acknowledgement generated mode** — Generated acknowledgements now use
   the sidecar delivery generator instead of always falling back to fixed

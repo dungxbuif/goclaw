@@ -39,6 +39,36 @@ func TestBuiltinToolSeedDataIncludesMemoryExpand(t *testing.T) {
 	t.Fatal("builtinToolSeedData() missing memory_expand")
 }
 
+func TestBuiltinToolSeedDataIncludesChannelCatalog(t *testing.T) {
+	t.Parallel()
+	for _, def := range builtinToolSeedData() {
+		if def.Name != "channel_catalog" {
+			continue
+		}
+		if def.Category != "messaging" {
+			t.Fatalf("channel_catalog category = %q, want messaging", def.Category)
+		}
+		if !def.Enabled {
+			t.Fatal("channel_catalog should be enabled by default")
+		}
+		return
+	}
+	t.Fatal("builtinToolSeedData() missing channel_catalog")
+}
+
+func TestBuiltinToolSeedDataIncludesMezonInteractive(t *testing.T) {
+	for _, def := range builtinToolSeedData() {
+		if def.Name != "mezon_interactive" {
+			continue
+		}
+		if def.Category != "messaging" || !def.Enabled {
+			t.Fatalf("mezon_interactive = %#v", def)
+		}
+		return
+	}
+	t.Fatal("builtinToolSeedData() missing mezon_interactive")
+}
+
 func TestBuiltinToolSeedDataMemoryCategoryIncludesRecallTools(t *testing.T) {
 	t.Parallel()
 	got := map[string]bool{}

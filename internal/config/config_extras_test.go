@@ -518,3 +518,33 @@ func TestLoad_ChannelAutoEnable_Slack(t *testing.T) {
 		t.Error("Slack should be auto-enabled when both tokens are set")
 	}
 }
+
+func TestLoad_ChannelAutoEnable_Mezon(t *testing.T) {
+	t.Setenv("GOCLAW_MEZON_BOT_ID", "123456")
+	t.Setenv("GOCLAW_MEZON_TOKEN", "mezon-secret")
+
+	cfg, err := Load("/nonexistent/path")
+	if err != nil {
+		t.Fatalf("load error: %v", err)
+	}
+	if !cfg.Channels.Mezon.Enabled {
+		t.Error("Mezon should be auto-enabled when bot ID and token are set")
+	}
+	if cfg.Channels.Mezon.BotID != "123456" || cfg.Channels.Mezon.Token != "mezon-secret" {
+		t.Fatalf("mezon credentials = (%q, %q)", cfg.Channels.Mezon.BotID, cfg.Channels.Mezon.Token)
+	}
+}
+
+func TestMezonTokenIsMaskedAndStripped(t *testing.T) {
+	cfg := Default()
+	cfg.Channels.Mezon.BotID = "123456"
+	cfg.Channels.Mezon.Token = "mezon-secret"
+	masked := cfg.MaskedCopy()
+	if masked.Channels.Mezon.Token != secretMask || masked.Channels.Mezon.BotID != "123456" {
+		t.Fatalf("masked mezon = %+v", masked.Channels.Mezon)
+	}
+	cfg.StripSecrets()
+	if cfg.Channels.Mezon.Token != "" || cfg.Channels.Mezon.BotID != "123456" {
+		t.Fatalf("stripped mezon = %+v", cfg.Channels.Mezon)
+	}
+}

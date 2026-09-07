@@ -797,10 +797,14 @@ func (c *Channel) sendDocument(ctx context.Context, chatID telego.ChatID, filePa
 // same markdown→HTML rendering as outbound sends. Implements channels.MessageEditor
 // so the agent's `message` tool (action=edit) can flip status markers in place.
 // The bot must be an admin with edit rights in the target chat/channel.
-func (c *Channel) EditMessage(ctx context.Context, chatID string, messageID int, content string) error {
+func (c *Channel) EditMessage(ctx context.Context, chatID, messageIDRaw, content string) error {
 	id, err := strconv.ParseInt(chatID, 10, 64)
 	if err != nil {
 		return fmt.Errorf("invalid telegram chat id %q: %w", chatID, err)
+	}
+	messageID, err := strconv.Atoi(messageIDRaw)
+	if err != nil {
+		return fmt.Errorf("invalid telegram message id %q: %w", messageIDRaw, err)
 	}
 	html := markdownToTelegramHTML(content)
 	err = c.editMessage(ctx, id, messageID, html)
@@ -817,13 +821,17 @@ func (c *Channel) EditMessage(ctx context.Context, chatID string, messageID int,
 // channels.MessageReactor). Only Telegram-supported reaction emojis are allowed
 // — ✅/❌ are not among them, so callers must pass e.g. 👍. Reacting to the bot's
 // own status post is allowed.
-func (c *Channel) ReactToMessage(ctx context.Context, chatID string, messageID int, emoji string) error {
+func (c *Channel) ReactToMessage(ctx context.Context, chatID, messageIDRaw, emoji string) error {
 	if !telegramSupportedEmojis[emoji] {
 		return fmt.Errorf("emoji %q is not a supported Telegram reaction", emoji)
 	}
 	id, err := parseRawChatID(chatID)
 	if err != nil {
 		return fmt.Errorf("invalid telegram chat id %q: %w", chatID, err)
+	}
+	messageID, err := strconv.Atoi(messageIDRaw)
+	if err != nil {
+		return fmt.Errorf("invalid telegram message id %q: %w", messageIDRaw, err)
 	}
 	return c.bot.SetMessageReaction(ctx, &telego.SetMessageReactionParams{
 		ChatID:    tu.ID(id),

@@ -388,6 +388,49 @@ func (m *Manager) ListGroups(ctx context.Context, channelName string) ([]GroupIn
 	return glp.ListGroups(ctx)
 }
 
+// ListChannelCatalog delegates discovery to the selected channel instance.
+// ScopeID must come from authenticated conversation context.
+func (m *Manager) ListChannelCatalog(ctx context.Context, channelName string, opts ChannelCatalogOptions) ([]ChannelCatalogEntry, error) {
+	if opts.ScopeID == "" {
+		return nil, fmt.Errorf("channel catalog requires a trusted clan/guild scope")
+	}
+	m.mu.RLock()
+	ch, ok := m.channels[channelName]
+	m.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("channel %q not found", channelName)
+	}
+	provider, ok := ch.(ChannelCatalogProvider)
+	if !ok {
+		return nil, fmt.Errorf("channel %q does not support channel catalog", channelName)
+	}
+	entries, err := provider.ListChannelCatalog(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	SortChannelCatalog(entries)
+	return entries, nil
+}
+
+// SendInteractiveMessage delegates a native interactive card to the selected
+// adapter after verifying the destination remains in the trusted container.
+func (m *Manager) SendInteractiveMessage(ctx context.Context, channelName, chatID, containerID string, message InteractiveMessage) (string, error) {
+	if containerID == "" {
+		return "", fmt.Errorf("interactive message requires a trusted container scope")
+	}
+	m.mu.RLock()
+	ch, ok := m.channels[channelName]
+	m.mu.RUnlock()
+	if !ok {
+		return "", fmt.Errorf("channel %q not found", channelName)
+	}
+	provider, ok := ch.(InteractiveMessageProvider)
+	if !ok {
+		return "", fmt.Errorf("channel %q does not support interactive messages", channelName)
+	}
+	return provider.SendInteractiveMessage(ctx, chatID, containerID, message)
+}
+
 // ResolveGroupTitle delegates to the channel's GroupTitleProvider if available.
 func (m *Manager) ResolveGroupTitle(ctx context.Context, channelName, chatID string) (string, error) {
 	m.mu.RLock()

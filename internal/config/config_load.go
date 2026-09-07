@@ -100,6 +100,9 @@ func Default() *Config {
 			Discord: DiscordConfig{
 				HistoryLimit: 200,
 			},
+			Mezon: MezonConfig{
+				HistoryLimit: 200,
+			},
 		},
 		Gateway: GatewayConfig{
 			Host:            "0.0.0.0",
@@ -189,6 +192,8 @@ func (c *Config) applyEnvOverrides() {
 	envStr("GOCLAW_MCP_SERVER_TOKEN", &c.Gateway.MCPServerToken)
 	envStr("GOCLAW_TELEGRAM_TOKEN", &c.Channels.Telegram.Token)
 	envStr("GOCLAW_DISCORD_TOKEN", &c.Channels.Discord.Token)
+	envStr("GOCLAW_MEZON_BOT_ID", &c.Channels.Mezon.BotID)
+	envStr("GOCLAW_MEZON_TOKEN", &c.Channels.Mezon.Token)
 	envStr("GOCLAW_ZALO_TOKEN", &c.Channels.Zalo.Token)
 	envStr("GOCLAW_LARK_APP_ID", &c.Channels.Feishu.AppID)
 	envStr("GOCLAW_LARK_APP_SECRET", &c.Channels.Feishu.AppSecret)
@@ -211,6 +216,9 @@ func (c *Config) applyEnvOverrides() {
 	}
 	if c.Channels.Discord.Token != "" {
 		c.Channels.Discord.Enabled = true
+	}
+	if c.Channels.Mezon.BotID != "" && c.Channels.Mezon.Token != "" {
+		c.Channels.Mezon.Enabled = true
 	}
 	if c.Channels.Zalo.Token != "" {
 		c.Channels.Zalo.Enabled = true

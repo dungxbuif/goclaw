@@ -321,12 +321,12 @@ func (m *Manager) SendToChannel(ctx context.Context, channelName, chatID, conten
 // MessageEditor is optionally implemented by channels that support editing an
 // existing message in place (e.g. Telegram admin editing a channel post).
 type MessageEditor interface {
-	EditMessage(ctx context.Context, chatID string, messageID int, content string) error
+	EditMessage(ctx context.Context, chatID, messageID, content string) error
 }
 
 // EditChannelMessage edits an existing message in a channel by name. Returns an
 // error if the channel is unknown or its type does not support editing.
-func (m *Manager) EditChannelMessage(ctx context.Context, channelName, chatID string, messageID int, content string) error {
+func (m *Manager) EditChannelMessage(ctx context.Context, channelName, chatID, messageID, content string) error {
 	m.mu.RLock()
 	channel, exists := m.channels[channelName]
 	m.mu.RUnlock()
@@ -344,12 +344,12 @@ func (m *Manager) EditChannelMessage(ctx context.Context, channelName, chatID st
 // MessageReactor is optionally implemented by channels that can set an emoji
 // reaction on an existing message.
 type MessageReactor interface {
-	ReactToMessage(ctx context.Context, chatID string, messageID int, emoji string) error
+	ReactToMessage(ctx context.Context, chatID, messageID, emoji string) error
 }
 
 // ReactToMessage sets an emoji reaction on a message in a channel by name.
 // Returns an error if the channel is unknown or does not support reactions.
-func (m *Manager) ReactToMessage(ctx context.Context, channelName, chatID string, messageID int, emoji string) error {
+func (m *Manager) ReactToMessage(ctx context.Context, channelName, chatID, messageID, emoji string) error {
 	m.mu.RLock()
 	channel, exists := m.channels[channelName]
 	m.mu.RUnlock()
@@ -362,6 +362,24 @@ func (m *Manager) ReactToMessage(ctx context.Context, channelName, chatID string
 		return fmt.Errorf("channel %s (%s) does not support reactions", channelName, channel.Type())
 	}
 	return reactor.ReactToMessage(ctx, chatID, messageID, emoji)
+}
+
+type MessageDeleter interface {
+	DeleteMessage(ctx context.Context, chatID, messageID string) error
+}
+
+func (m *Manager) DeleteChannelMessage(ctx context.Context, channelName, chatID, messageID string) error {
+	m.mu.RLock()
+	channel, exists := m.channels[channelName]
+	m.mu.RUnlock()
+	if !exists {
+		return fmt.Errorf("channel %s not found", channelName)
+	}
+	deleter, ok := channel.(MessageDeleter)
+	if !ok {
+		return fmt.Errorf("channel %s (%s) does not support deleting bot-owned messages", channelName, channel.Type())
+	}
+	return deleter.DeleteMessage(ctx, chatID, messageID)
 }
 
 // TopicMessagePoster is optionally implemented by channels that can post a

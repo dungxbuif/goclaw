@@ -22,8 +22,7 @@ import (
 // channel manager, so HandleAgentEvent drops its chunks and nothing reaches a
 // user incrementally — the task result keeps coming from the final RunResult.
 func TestHandleTeammateMessageSchedulesStreamedRun(t *testing.T) {
-	var gotReq agent.RunRequest
-	ran := make(chan struct{})
+	firstReq := make(chan agent.RunRequest, 1)
 
 	sched := scheduler.NewScheduler(
 		scheduler.DefaultLanes(),
@@ -34,8 +33,10 @@ func TestHandleTeammateMessageSchedulesStreamedRun(t *testing.T) {
 			MaxConcurrent: 1,
 		},
 		func(_ context.Context, req agent.RunRequest) (*agent.RunResult, error) {
-			gotReq = req
-			close(ran)
+			select {
+			case firstReq <- req:
+			default:
+			}
 			return &agent.RunResult{Content: "member deliverable"}, nil
 		},
 	)
@@ -47,6 +48,9 @@ func TestHandleTeammateMessageSchedulesStreamedRun(t *testing.T) {
 		Sched:      sched,
 		ChannelMgr: channelMgr,
 	}
+	// The handler starts a result-announcement goroutine. Drain it before the
+	// deferred scheduler shutdown, matching the production consumer lifecycle.
+	defer deps.BgWg.Wait()
 
 	msg := bus.InboundMessage{
 		Channel:  tools.ChannelSystem,
@@ -65,8 +69,9 @@ func TestHandleTeammateMessageSchedulesStreamedRun(t *testing.T) {
 		t.Fatal("handleTeammateMessage() = false, want true for a teammate: message on the system channel")
 	}
 
+	var gotReq agent.RunRequest
 	select {
-	case <-ran:
+	case gotReq = <-firstReq:
 	case <-time.After(5 * time.Second):
 		t.Fatal("teammate run was never scheduled")
 	}

@@ -191,6 +191,27 @@ func TestChannelAwareToolsHiddenWithoutChannelType(t *testing.T) {
 	}
 }
 
+func TestChannelCatalogVisibleOnlyForSupportedChannels(t *testing.T) {
+	reg := tools.NewRegistry()
+	reg.Register(tools.NewChannelCatalogTool())
+	l := &Loop{provider: &stubProvider{}, tools: reg}
+
+	for _, tc := range []struct {
+		channel string
+		want    bool
+	}{
+		{channel: "", want: false},
+		{channel: "telegram", want: false},
+		{channel: "discord", want: true},
+		{channel: "mezon", want: true},
+	} {
+		defs, _, _ := l.buildFilteredTools(&RunRequest{ChannelType: tc.channel}, false, 1, 10, nil, nil)
+		if got := hasFunctionTool(defs, "channel_catalog"); got != tc.want {
+			t.Fatalf("channel %q visibility = %v, want %v", tc.channel, got, tc.want)
+		}
+	}
+}
+
 func TestTelegramManagerHiddenUntilChannelPermissionEnabled(t *testing.T) {
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewTelegramManagerTool())

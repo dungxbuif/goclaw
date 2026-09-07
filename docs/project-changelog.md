@@ -4,6 +4,40 @@ Significant changes, features, and fixes in reverse chronological order.
 
 ---
 
+## 2026-09-07
+
+### Scoped channel capability discovery
+
+**Features**
+
+- Added a shared channel catalog contract and read-only agent tool for listing
+  or exactly resolving channels inside the current Discord guild or Mezon clan.
+- Added Discord permission-derived and Mezon adapter-derived capability
+  evidence, hierarchy metadata, deterministic ordering, optional thread
+  inclusion, and guarded refresh caching.
+- Added Mezon edit-own, reaction, and delete-own support through the generic
+  message tool, preserving snowflake IDs as strings and verifying bot ownership
+  before destructive operations.
+- Added the clan-scoped `mezon_interactive` tool with all SDK builder-backed
+  component families and converted button/dropdown callbacks into normal agent
+  turns so interactions receive contextual replies.
+
+**Security**
+
+- Propagated authenticated guild/clan scope through the agent run context rather
+  than accepting it from model-generated arguments.
+- Added fail-closed Mezon destination validation to prevent agent-initiated
+  sends and updates from crossing the source clan boundary.
+- Rejected interactive sends without trusted clan context and dropped DM,
+  unresolved-clan, and bot-authored interaction callbacks.
+
+**Tests**
+
+- Added contract, tool, gateway propagation, provider mapping, permission,
+  cancellation, refresh cooldown, and cross-clan delivery regression coverage.
+
+---
+
 ## 2026-07-08
 
 ### Passive memory extraction tuning

@@ -152,6 +152,15 @@ func ToolChannelTypeFromCtx(ctx context.Context) string {
 	return ""
 }
 
+// ToolContainerIDFromCtx returns the authenticated clan/guild scope of the
+// current conversation. It is populated by the gateway, never by tool input.
+func ToolContainerIDFromCtx(ctx context.Context) string {
+	if rc := store.RunContextFromCtx(ctx); rc != nil {
+		return rc.ContainerID
+	}
+	return ""
+}
+
 func WithTelegramManagerPermissions(ctx context.Context, permissions []string) context.Context {
 	return context.WithValue(ctx, ctxTelegramManagerPermissions, permissions)
 }

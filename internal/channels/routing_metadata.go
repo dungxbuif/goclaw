@@ -6,6 +6,7 @@ package channels
 // correct thread / topic / subgroup routing bucket on each channel.
 var routingMetaKeys = []string{
 	"message_thread_id",      // telegram forum topics
+	"topic_id",               // mezon topics
 	"local_key",              // composite chat-id suffix
 	"group_id",               // legacy group identifier
 	"feishu_reply_target_id", // feishu/lark thread reply routing

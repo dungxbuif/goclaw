@@ -113,6 +113,7 @@ ui/web/nginx.staging.conf
 
 # Local scratchpad / one-shot artifacts (never commit)
 /.artifacts/
+/.worktrees/
 **/debug-*.log
 /*.sql
 scripts/docker-patch-*.sql

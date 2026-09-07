@@ -43,6 +43,7 @@ type RunContext struct {
 	BuiltinToolSettings map[string][]byte
 	Channel             string
 	ChannelType         string
+	ContainerID         string
 	ChannelContextScope ChannelContextScope
 	SubagentsCfg        *config.SubagentsConfig
 	ParentModel         string

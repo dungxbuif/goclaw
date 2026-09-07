@@ -67,6 +67,10 @@ func wireExtraTools(
 	toolsReg.Register(tools.NewSendFileTool(workspace, agentCfg.RestrictToWorkspace))
 	// Group members tool (list members in group chats)
 	toolsReg.Register(tools.NewListGroupMembersTool())
+	// Current Discord guild / Mezon clan channel discovery.
+	toolsReg.Register(tools.NewChannelCatalogTool())
+	// Native Mezon cards and controls, scoped to the current clan channel.
+	toolsReg.Register(tools.NewMezonInteractiveTool())
 	// Zalo group list tool (resolve a group's real chat ID from its display name)
 	toolsReg.Register(tools.NewListGroupsTool())
 	// Telegram manager tool (admin/forum/message management; gated by tool policy)
@@ -75,7 +79,7 @@ func wireExtraTools(
 	toolsReg.Register(tools.NewTelegramManagerTool())
 	// MCP credential manager tool (view and manage per-user MCP credentials)
 	toolsReg.Register(tools.NewMCPCredentialManagerTool())
-	slog.Info("session + message + send_file + telegram_manager + mcp_credential_manager tools registered")
+	slog.Info("session + message + send_file + channel_catalog + mezon_interactive + telegram_manager + mcp_credential_manager tools registered")
 
 	// Register legacy tool aliases (backward-compat names from policy.go).
 	for alias, canonical := range tools.LegacyToolAliases() {

@@ -63,12 +63,30 @@ type TelegramManagerConfig struct {
 type ChannelsConfig struct {
 	Telegram          TelegramConfig           `json:"telegram"`
 	Discord           DiscordConfig            `json:"discord"`
+	Mezon             MezonConfig              `json:"mezon"`
 	Slack             SlackConfig              `json:"slack"`
 	WhatsApp          WhatsAppConfig           `json:"whatsapp"`
 	Zalo              ZaloConfig               `json:"zalo"`
 	ZaloPersonal      ZaloPersonalConfig       `json:"zalo_personal"`
 	Feishu            FeishuConfig             `json:"feishu"`
 	PendingCompaction *PendingCompactionConfig `json:"pending_compaction,omitempty"` // global pending message compaction settings
+}
+
+// MezonConfig configures a Mezon bot connected through mezon-sdk-go.
+type MezonConfig struct {
+	Enabled        bool                `json:"enabled"`
+	BotID          string              `json:"bot_id"`
+	Token          string              `json:"token"`
+	Host           string              `json:"host,omitempty"`
+	Port           string              `json:"port,omitempty"`
+	UseSSL         *bool               `json:"use_ssl,omitempty"`
+	AllowFrom      FlexibleStringSlice `json:"allow_from"`
+	DMPolicy       string              `json:"dm_policy,omitempty"`
+	GroupPolicy    string              `json:"group_policy,omitempty"`
+	RequireMention *bool               `json:"require_mention,omitempty"`
+	HistoryLimit   int                 `json:"history_limit,omitempty"`
+	BlockReply     *bool               `json:"block_reply,omitempty"`
+	ChatBehavior   *ChatBehaviorConfig `json:"chat_behavior,omitempty"`
 }
 
 type TelegramConfig struct {

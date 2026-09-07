@@ -34,6 +34,8 @@ type Channel struct {
 	audioMgr             *audio.Manager              // unified STT via audio.Manager (nil = no STT)
 	contactRefreshMu     sync.Mutex
 	contactRefreshCancel context.CancelFunc
+	catalogRefreshMu     sync.Mutex
+	catalogRefreshed     map[string]time.Time
 	// pairingService, pairingDebounce, approvedGroups, groupHistory, historyLimit, requireMention
 	// are inherited from channels.BaseChannel.
 }

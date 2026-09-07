@@ -490,6 +490,7 @@ func processNormalMessage(
 		ForwardMedia: fwdMedia,
 		Channel:      msg.Channel,
 		ChannelType:  resolveChannelType(deps.ChannelMgr, msg.Channel),
+		ContainerID:  conversationContainerID(msg),
 		// Forward Bitrix24 portal domain from channel metadata so the
 		// system prompt can teach the LLM the correct entity URL host.
 		// Empty for non-bitrix24 channels — section is skipped downstream.
@@ -660,6 +661,16 @@ func processNormalMessage(
 			go autoSetFollowup(ctx, deps.TeamStore, deps.AgentStore, agentKey, channel, chatID, replyContent)
 		}
 	}(agentID, msg.Channel, msg.ChatID, sessionKey, runID, peerKind, inboundMessage, outMeta, blockReply, chatBehavior, channelStream, ptd, msg.TenantID, agentLoop.UUID(), agentLoop.OtherConfig())
+}
+
+func conversationContainerID(msg bus.InboundMessage) string {
+	if msg.Metadata == nil {
+		return ""
+	}
+	if clanID := strings.TrimSpace(msg.Metadata["clan_id"]); clanID != "" && clanID != "0" {
+		return clanID
+	}
+	return strings.TrimSpace(msg.Metadata["guild_id"])
 }
 
 func buildDeliveryRuntime(ctx context.Context, deps *ConsumerDeps, agentLoop agent.Agent, behavior channels.ResolvedChatBehavior, msg bus.InboundMessage, userID, peerKind, channelType, agentKey string) channels.DeliveryRuntime {

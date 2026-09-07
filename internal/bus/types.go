@@ -57,6 +57,9 @@ type OutboundMessage struct {
 const (
 	MetaForwardOriginChannel = "forward_origin_channel"
 	MetaForwardOriginChatID  = "forward_origin_chat_id"
+	// MetaSourceContainerID is the authenticated clan/guild scope copied from
+	// tool context for adapter-level cross-container delivery checks.
+	MetaSourceContainerID = "source_container_id"
 )
 
 // MediaAttachment represents a media file to be sent with a message.

@@ -247,7 +247,7 @@ After `connect`, **all methods are auto-scoped** to the API key's tenant. Events
 
 ## Chat Channels
 
-Chat channels (Telegram, Discord, Zalo, Slack, WhatsApp, Feishu) connect **directly** to GoClaw — no API key needed. Tenant isolation is baked into the channel instance at registration time.
+Chat channels (Telegram, Discord, Mezon, Zalo, Slack, WhatsApp, Feishu) connect **directly** to GoClaw — no GoClaw API key is needed. Tenant isolation is baked into the channel instance at registration time.
 
 ```mermaid
 sequenceDiagram

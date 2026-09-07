@@ -89,7 +89,11 @@ export const credentialsSchema: Record<string, FieldDef[]> = {
     { key: "token", label: "Bot Token", type: "password", required: true, placeholder: "123456:ABC-DEF...", help: "From @BotFather" },
   ],
   discord: [
-    { key: "token", label: "Bot Token", type: "password", required: true, placeholder: "Discord bot token" },
+	{ key: "token", label: "Bot Token", type: "password", required: true, placeholder: "Discord bot token" },
+  ],
+  mezon: [
+    { key: "bot_id", label: "Bot ID", type: "text", required: true, placeholder: "Mezon application ID", help: "From the Mezon Developer Portal" },
+    { key: "token", label: "Bot Token", type: "password", required: true, placeholder: "Mezon bot token", help: "From the Mezon Developer Portal" },
   ],
   slack: [
     { key: "bot_token", label: "Bot Token", type: "password", required: true, placeholder: "xoxb-...", help: "Bot User OAuth Token from your Slack app's OAuth & Permissions page" },
@@ -175,6 +179,17 @@ export const configSchema: Record<string, FieldDef[]> = {
     { key: "require_mention", label: "Require @mention in groups", type: "boolean", defaultValue: true },
     { key: "history_limit", label: "Group History Limit", type: "number", defaultValue: 200, help: "Max pending group messages for context (0 = disabled)" },
     { key: "allow_from", label: "Allowed Users", type: "tags", help: "Discord user IDs" },
+	...chatBehaviorOverrideFields,
+  ],
+  mezon: [
+    { key: "dm_policy", label: "DM Policy", type: "select", options: dmPolicyOptions, defaultValue: "pairing" },
+    { key: "group_policy", label: "Group Policy", type: "select", options: groupPolicyOptions, defaultValue: "pairing" },
+    { key: "require_mention", label: "Require @mention in groups", type: "boolean", defaultValue: true },
+    { key: "history_limit", label: "Group History Limit", type: "number", defaultValue: 200, help: "Max pending group messages for context (0 = disabled)" },
+    { key: "allow_from", label: "Allowed Users", type: "tags", help: "Mezon user IDs" },
+    { key: "host", label: "Gateway Host", type: "text", placeholder: "gw.mezon.ai", help: "Override only for self-hosted or development gateways", advanced: true },
+    { key: "port", label: "Gateway Port", type: "text", placeholder: "443", advanced: true },
+    { key: "use_ssl", label: "Use TLS", type: "boolean", defaultValue: true, advanced: true },
     ...chatBehaviorOverrideFields,
   ],
   slack: [

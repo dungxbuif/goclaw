@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -30,6 +31,7 @@ type MessageTool struct {
 	topicResolver  TopicResolver
 	topicPoster    TopicPoster
 	reactionSetter ReactionSetter
+	deleter        MessageDeleter
 	msgBus         *bus.MessageBus
 	tenantChecker  ChannelTenantChecker
 }
@@ -43,12 +45,13 @@ func (t *MessageTool) SetChannelEditor(e ChannelEditor)               { t.editor
 func (t *MessageTool) SetTopicResolver(r TopicResolver)               { t.topicResolver = r }
 func (t *MessageTool) SetTopicPoster(p TopicPoster)                   { t.topicPoster = p }
 func (t *MessageTool) SetReactionSetter(r ReactionSetter)             { t.reactionSetter = r }
+func (t *MessageTool) SetMessageDeleter(d MessageDeleter)             { t.deleter = d }
 func (t *MessageTool) SetMessageBus(b *bus.MessageBus)                { t.msgBus = b }
 func (t *MessageTool) SetChannelTenantChecker(c ChannelTenantChecker) { t.tenantChecker = c }
 
 func (t *MessageTool) Name() string { return "message" }
 func (t *MessageTool) Description() string {
-	return "Send a message to a channel (Telegram, Discord, Slack, Zalo, Feishu/Lark, WhatsApp, etc.). In a DM/group, omit `target` to reply to the current chat — DO NOT set a different target unless the user explicitly asked you to forward (then set `forward=true` + `forward_reason` quoting the request). In cron/heartbeat/subagent/team contexts, set `target` per job spec."
+	return "Send a message, or perform adapter-supported edit, reaction, and delete-own operations. In a DM/group, omit `target` to reply to the current chat — DO NOT set a different target unless the user explicitly asked you to forward (then set `forward=true` + `forward_reason` quoting the request). Use quoted strings for large message IDs. In cron/heartbeat/subagent/team contexts, set `target` per job spec."
 }
 
 func (t *MessageTool) Parameters() map[string]any {
@@ -57,12 +60,12 @@ func (t *MessageTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"action": map[string]any{
 				"type":        "string",
-				"description": "Action: 'send' a new message, 'edit' an existing one (change its text in place), or 'react' (set an emoji reaction on an existing message — e.g. mark your own status post as done). To edit, the user usually replies to the target message — use its id from reply_to_message_id in your context.",
-				"enum":        []string{"send", "edit", "react"},
+				"description": "Action: 'send' a new message, 'edit' a bot-owned message, 'react' to a message, or 'delete' a bot-owned message. Message operations always target the current chat.",
+				"enum":        []string{"send", "edit", "react", "delete"},
 			},
 			"message_id": map[string]any{
-				"type":        "integer",
-				"description": "For action='edit' or 'react': the id of the target message. For 'react' this is usually your OWN earlier post (the message_id returned when you sent it). For 'edit' take it from reply_to_message_id when the user replied to the message they want edited.",
+				"oneOf":       []map[string]any{{"type": "string"}, {"type": "integer"}},
+				"description": "For edit/react/delete: target message ID. Use a quoted string for large Discord/Mezon snowflake IDs so JSON does not lose precision.",
 			},
 			"emoji": map[string]any{
 				"type":        "string",
@@ -93,7 +96,7 @@ func (t *MessageTool) Parameters() map[string]any {
 				"description": "Quote the user's literal request when forward=true (e.g. 'gửi báo cáo này sang group dev'). Required when forward=true.",
 			},
 		},
-		"required": []string{"action", "message"},
+		"required": []string{"action"},
 	}
 }
 
@@ -105,8 +108,11 @@ func (t *MessageTool) Execute(ctx context.Context, args map[string]any) *Result 
 	if action == "react" {
 		return t.executeReact(ctx, args)
 	}
+	if action == "delete" {
+		return t.executeDelete(ctx, args)
+	}
 	if action != "send" {
-		return ErrorResult(fmt.Sprintf("unsupported action: %s (only 'send', 'edit' and 'react' are supported)", action))
+		return ErrorResult(fmt.Sprintf("unsupported action: %s (use 'send', 'edit', 'react', or 'delete')", action))
 	}
 
 	// Posting into a named forum topic of the current group.
@@ -286,6 +292,12 @@ func (t *MessageTool) buildOutboundMetadata(ctx context.Context, target, forward
 	if isGroupContext(ctx) {
 		meta = map[string]string{"group_id": target}
 	}
+	if containerID := ToolContainerIDFromCtx(ctx); containerID != "" {
+		if meta == nil {
+			meta = make(map[string]string, 1)
+		}
+		meta[bus.MetaSourceContainerID] = containerID
+	}
 	if forwardReason == "" {
 		return meta
 	}
@@ -367,9 +379,9 @@ func (t *MessageTool) executeEdit(ctx context.Context, args map[string]any) *Res
 	if t.editor == nil {
 		return ErrorResult("editing messages is not supported in this context")
 	}
-	messageID := argInt(args, "message_id")
-	if messageID == 0 {
-		return ErrorResult("message_id is required for edit (use the id of the message to change — usually the one the user replied to)")
+	messageID, idErr := messageIDArg(args)
+	if idErr != nil {
+		return ErrorResult(idErr.Error())
 	}
 	message := argString(args, "message")
 	if message == "" {
@@ -401,7 +413,7 @@ func (t *MessageTool) executeEdit(ctx context.Context, args map[string]any) *Res
 	if err := t.editor(ctx, channel, target, messageID, message); err != nil {
 		return ErrorResult(fmt.Sprintf("failed to edit message: %v", err))
 	}
-	return SilentResult(fmt.Sprintf(`{"status":"edited","channel":"%s","target":"%s","message_id":%d}`, channel, target, messageID))
+	return SilentResult(fmt.Sprintf(`{"status":"edited","channel":"%s","target":"%s","message_id":%q}`, channel, target, messageID))
 }
 
 // executeReact sets an emoji reaction on an existing message (e.g. 👍 on the
@@ -411,9 +423,9 @@ func (t *MessageTool) executeReact(ctx context.Context, args map[string]any) *Re
 	if t.reactionSetter == nil {
 		return ErrorResult("reactions are not supported in this context")
 	}
-	messageID := argInt(args, "message_id")
-	if messageID == 0 {
-		return ErrorResult("message_id is required for react (the id of the message to react to — usually your own earlier post)")
+	messageID, idErr := messageIDArg(args)
+	if idErr != nil {
+		return ErrorResult(idErr.Error())
 	}
 	emoji := argString(args, "emoji")
 	if emoji == "" {
@@ -441,7 +453,44 @@ func (t *MessageTool) executeReact(ctx context.Context, args map[string]any) *Re
 	if err := t.reactionSetter(ctx, channel, target, messageID, emoji); err != nil {
 		return ErrorResult(fmt.Sprintf("failed to set reaction: %v", err))
 	}
-	return SilentResult(fmt.Sprintf(`{"status":"reacted","channel":"%s","target":"%s","message_id":%d,"emoji":"%s"}`, channel, target, messageID, emoji))
+	return SilentResult(fmt.Sprintf(`{"status":"reacted","channel":"%s","target":"%s","message_id":%q,"emoji":"%s"}`, channel, target, messageID, emoji))
+}
+
+func (t *MessageTool) executeDelete(ctx context.Context, args map[string]any) *Result {
+	if t.deleter == nil {
+		return ErrorResult("deleting messages is not supported in this context")
+	}
+	messageID, err := messageIDArg(args)
+	if err != nil {
+		return ErrorResult(err.Error())
+	}
+	channel := ToolChannelFromCtx(ctx)
+	target := ToolChatIDFromCtx(ctx)
+	if channel == "" || target == "" {
+		return ErrorResult("delete requires the current channel/chat context")
+	}
+	if tenantErr := t.validateChannelTenant(ctx, channel, target); tenantErr != nil {
+		return tenantErr
+	}
+	if err := t.deleter(ctx, channel, target, messageID); err != nil {
+		return ErrorResult(fmt.Sprintf("failed to delete message: %v", err))
+	}
+	return SilentResult(fmt.Sprintf(`{"status":"deleted","channel":"%s","target":"%s","message_id":%q}`, channel, target, messageID))
+}
+
+func messageIDArg(args map[string]any) (string, error) {
+	v, ok := args["message_id"]
+	if !ok || v == nil {
+		return "", errors.New("message_id is required")
+	}
+	if n, ok := v.(float64); ok && (n > 9007199254740991 || n < -9007199254740991) {
+		return "", errors.New("large message_id must be passed as a quoted string to avoid JSON precision loss")
+	}
+	id := argString(args, "message_id")
+	if id == "" || id == "0" {
+		return "", errors.New("message_id is required")
+	}
+	return id, nil
 }
 
 // validateChannelTenant checks the target channel belongs to the current tenant.

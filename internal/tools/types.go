@@ -104,7 +104,7 @@ type ChannelSenderAware interface {
 // ChannelEditor abstracts editing an existing message in a channel.
 // Implemented by channels.Manager.EditChannelMessage. Not all channel types
 // support editing arbitrary messages; unsupported channels return an error.
-type ChannelEditor func(ctx context.Context, channel, chatID string, messageID int, content string) error
+type ChannelEditor func(ctx context.Context, channel, chatID, messageID, content string) error
 
 // ChannelEditorAware tools can receive a channel editor function.
 type ChannelEditorAware interface {
@@ -115,11 +115,19 @@ type ChannelEditorAware interface {
 // message. Implemented by channels.Manager.ReactToMessage. The emoji must be a
 // platform-supported reaction (e.g. Telegram allows a fixed set like 👍/👎/🔥);
 // unsupported channels or emojis return an error.
-type ReactionSetter func(ctx context.Context, channel, chatID string, messageID int, emoji string) error
+type ReactionSetter func(ctx context.Context, channel, chatID, messageID, emoji string) error
 
 // ReactionSetterAware tools can receive a reaction setter function.
 type ReactionSetterAware interface {
 	SetReactionSetter(ReactionSetter)
+}
+
+// MessageDeleter deletes a message only when the selected channel adapter can
+// prove that the bot owns it. Platform adapters must fail closed otherwise.
+type MessageDeleter func(ctx context.Context, channel, chatID, messageID string) error
+
+type MessageDeleterAware interface {
+	SetMessageDeleter(MessageDeleter)
 }
 
 // TopicResolver resolves a forum topic name to its message_thread_id within a

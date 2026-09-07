@@ -52,6 +52,26 @@ func TestIsSafeBitrixEntityToken(t *testing.T) {
 	}
 }
 
+func TestConversationContainerID(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  bus.InboundMessage
+		want string
+	}{
+		{name: "mezon clan", msg: bus.InboundMessage{Metadata: map[string]string{"clan_id": "clan-1"}}, want: "clan-1"},
+		{name: "discord guild", msg: bus.InboundMessage{Metadata: map[string]string{"guild_id": "guild-1"}}, want: "guild-1"},
+		{name: "clan takes precedence", msg: bus.InboundMessage{Metadata: map[string]string{"clan_id": "clan-1", "guild_id": "guild-1"}}, want: "clan-1"},
+		{name: "missing metadata", msg: bus.InboundMessage{}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := conversationContainerID(tt.msg); got != tt.want {
+				t.Fatalf("conversationContainerID() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestDeriveGroupUserID pins the group-scope userID precedence: Discord guild
 // member → openline participant → group fallback, with direct messages passing
 // msg.UserID through untouched. The openline participant branch is what gives

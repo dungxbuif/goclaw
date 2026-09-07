@@ -25,6 +25,7 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/channels/discord"
 	"github.com/nextlevelbuilder/goclaw/internal/channels/facebook"
 	"github.com/nextlevelbuilder/goclaw/internal/channels/feishu"
+	mezonchannel "github.com/nextlevelbuilder/goclaw/internal/channels/mezon"
 	"github.com/nextlevelbuilder/goclaw/internal/channels/pancake"
 	slackchannel "github.com/nextlevelbuilder/goclaw/internal/channels/slack"
 	"github.com/nextlevelbuilder/goclaw/internal/channels/telegram"
@@ -837,6 +838,9 @@ func runGateway() {
 		if rs, ok := t.(tools.ReactionSetterAware); ok {
 			rs.SetReactionSetter(channelMgr.ReactToMessage)
 		}
+		if md, ok := t.(tools.MessageDeleterAware); ok {
+			md.SetMessageDeleter(channelMgr.DeleteChannelMessage)
+		}
 		if tr, ok := t.(tools.TopicResolverAware); ok && pgStores != nil && pgStores.Contacts != nil {
 			contacts := pgStores.Contacts
 			tr.SetTopicResolver(func(ctx context.Context, channel, chatID, topicName string) (string, bool) {
@@ -879,6 +883,18 @@ func runGateway() {
 			gl.SetGroupLister(channelMgr.ListGroups)
 		}
 	}
+	// Wire current-container catalog on Discord and Mezon only. The manager
+	// receives trusted scope from the inbound run context, never model input.
+	if t, ok := toolsReg.Get("channel_catalog"); ok {
+		if cl, ok := t.(tools.ChannelCatalogListerAware); ok {
+			cl.SetChannelCatalogLister(channelMgr.ListChannelCatalog)
+		}
+	}
+	if t, ok := toolsReg.Get("mezon_interactive"); ok {
+		if sender, ok := t.(tools.InteractiveMessageSenderAware); ok {
+			sender.SetInteractiveMessageSender(channelMgr.SendInteractiveMessage)
+		}
+	}
 	// Wire Telegram manager on telegram_manager tool.
 	for _, toolName := range []string{"telegram_manager", "create_forum_topic"} {
 		if t, ok := toolsReg.Get(toolName); ok {
@@ -905,6 +921,7 @@ func runGateway() {
 		instanceLoader.SetUsageCapService(usageCapSvc)
 		instanceLoader.RegisterFactory(channels.TypeTelegram, telegram.FactoryWithStoresAndAudio(pgStores.Agents, pgStores.ConfigPermissions, pgStores.Teams, pgStores.SubagentTasks, pgStores.PendingMessages, audioMgr))
 		instanceLoader.RegisterFactory(channels.TypeDiscord, discord.FactoryWithStoresAndAudio(pgStores.Agents, pgStores.ConfigPermissions, pgStores.PendingMessages, audioMgr))
+		instanceLoader.RegisterFactory(channels.TypeMezon, mezonchannel.FactoryWithPendingStore(pgStores.PendingMessages))
 		instanceLoader.RegisterFactory(channels.TypeFeishu, feishu.FactoryWithStoresAndAudio(pgStores.Agents, pgStores.ConfigPermissions, pgStores.PendingMessages, audioMgr))
 		instanceLoader.RegisterFactory(channels.TypeZaloOA, zalo.Factory)
 		instanceLoader.RegisterFactory(channels.TypeZaloPersonal, zalopersonal.FactoryWithPendingStore(pgStores.PendingMessages))

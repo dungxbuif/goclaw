@@ -111,6 +111,8 @@ func builtinToolSeedData() []store.BuiltinToolDef {
 		{Name: "send_file", DisplayName: "Send File", Description: "Send an existing workspace file as an attachment in the current chat (does not create or modify the file)", Category: "messaging", Enabled: true},
 		{Name: "create_forum_topic", DisplayName: "Create Telegram Forum Topic", Description: "Create a Telegram forum topic and return its message_thread_id for routing", Category: "messaging", Enabled: true},
 		{Name: "list_group_members", DisplayName: "List Group Members", Description: "List the members of the current group chat", Category: "messaging", Enabled: true},
+		{Name: "channel_catalog", DisplayName: "Channel Catalog", Description: "List or resolve channels and supported capabilities within the current Discord guild or Mezon clan", Category: "messaging", Enabled: true},
+		{Name: "mezon_interactive", DisplayName: "Mezon Interactive", Description: "Send native interactive cards in the current trusted Mezon clan channel", Category: "messaging", Enabled: true},
 		{Name: "zalo_list_groups", DisplayName: "Zalo List Groups", Description: "Resolve a Zalo group's real chat ID from its display name", Category: "messaging", Enabled: true},
 
 		// scheduling

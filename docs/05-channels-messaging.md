@@ -172,8 +172,43 @@ Every channel must implement the base interface:
 | `BlockReplyChannel` | Override gateway block_reply setting | Discord, Feishu/Lark, Pancake, Slack, Zalo OA, Zalo Personal |
 | `ChatBehaviorChannel` | Override gateway chat_behavior setting | Bitrix24, Discord, Feishu/Lark, Pancake, Slack, Telegram, WhatsApp, Zalo OA, Zalo Personal |
 | `ReasoningDeliveryChannel` | Override channel-visible reasoning delivery | Telegram |
+| `ChannelCatalogProvider` | List channels and effective bot capabilities in a trusted container scope | Discord, Mezon |
+| `InteractiveMessageProvider` | Send a native interactive card in a trusted container | Mezon |
 
 `BaseChannel` provides a shared implementation that all channels embed: allowlist matching, `HandleMessage()`, `CheckPolicy()`, and user ID extraction.
+
+### Scoped channel discovery
+
+The `channel_catalog` tool lets an agent list or exactly resolve channels in the
+Discord guild or Mezon clan that produced the current inbound message. The
+container ID is copied into `RunContext` by the gateway and is never accepted
+from model arguments. Calls fail closed when scope is absent, the channel type
+is unsupported, or the connected bot cannot access that container.
+
+Discord filters entries by the bot's effective `VIEW_CHANNEL` permission and
+derives send/history/attachment capabilities from Discord permission bits.
+Mezon filters the SDK clan cache by exact clan ID and publishes only operations
+implemented by the adapter. Threads are opt-in. Results are deterministic and
+include `capability_evidence` (`permission` or `adapter`) so prompts can
+distinguish platform authorization from implementation support. Explicit
+refresh is serialized per guild/clan and has a five-second cooldown.
+
+For Mezon outbound group traffic, the adapter also validates the destination
+channel against the trusted source clan before sends and updates. A model cannot
+use channel discovery or message metadata to cross clan boundaries.
+
+The generic `message` tool carries message IDs as strings for edit, reaction,
+and delete operations. This is required for Discord/Mezon snowflakes larger than
+JavaScript's exact integer range. Telegram converts the string at its adapter
+boundary. Mezon exposes edit-own, reaction, and delete-own; ownership is checked
+against the configured bot ID before either edit or delete reaches the socket.
+
+The Mezon-only `mezon_interactive` tool maps a platform-neutral card model to
+the SDK's native button, input/textarea, select, radio/multi-choice, date-picker,
+and animation builders. It is fixed to the current channel and trusted clan.
+Button and dropdown events re-enter the normal inbound pipeline as explicit
+user turns, so the agent can respond in context; DM and unresolved-clan events
+fail closed.
 
 ### Activity Indicator (`ActivityIndicatorChannel`)
 
@@ -870,8 +905,18 @@ The bot app must have the `imbot` scope granted. The `disk` scope is **not** req
 | Module | Path | Purpose |
 |---|---|---|
 | Channel core | `internal/channels/` | `Channel` interface, `BaseChannel` (incl. `HandleMessageMedia()` method), `Manager` (StartAll/StopAll), outbound dispatcher, DB instance loader |
-| Platform adapters | `internal/channels/{telegram,feishu,discord,slack,whatsapp,zalo,bitrix24}/` | Per-platform: message handling, formatting, streaming, reactions, media, pairing |
+| Platform adapters | `internal/channels/{telegram,feishu,discord,mezon,slack,whatsapp,zalo,bitrix24}/` | Per-platform: message handling, formatting, streaming, reactions, media, pairing |
 | Bitrix24 media | `internal/channels/bitrix24/download.go`, `send_media.go` | Inbound file download via `imbot.v2.File.download`, outbound upload via `imbot.v2.File.upload` |
+
+---
+
+## 17. Mezon
+
+The Mezon adapter uses `github.com/dungxbuif/mezon-sdk-go` and the realtime
+gateway. It supports config-based startup and encrypted `channel_instances`
+credentials, interactive cards, and component callbacks. See
+[Mezon channel](mezon-channel.md) for configuration, policy, routing, lifecycle,
+interactive schemas, and current media limitations.
 | Audio / STT | `internal/audio/` | Audio manager, STT chain resolution, legacy STT bridge |
 | Pairing & routing | `internal/store/pg/pairing.go`, `cmd/gateway_consumer.go` | Pairing code persistence, inbound message routing and cancel interception |
 

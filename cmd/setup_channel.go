@@ -20,6 +20,7 @@ func setupChannelStep() {
 	typeOptions := []SelectOption[string]{
 		{"Telegram", "telegram"},
 		{"Discord", "discord"},
+		{"Mezon", "mezon"},
 		{"Slack", "slack"},
 	}
 	channelType, err := promptSelect("Channel type", typeOptions, 0)
@@ -43,6 +44,17 @@ func setupChannelStep() {
 		creds["token"] = token
 	case "discord":
 		token, err := promptPassword("Bot token", "from Discord Developer Portal")
+		if err != nil || token == "" {
+			return
+		}
+		creds["token"] = token
+	case "mezon":
+		botID, err := promptString("Bot ID", "from Mezon Developer Portal", "")
+		if err != nil || botID == "" {
+			return
+		}
+		creds["bot_id"] = botID
+		token, err := promptPassword("Bot token", "from Mezon Developer Portal")
 		if err != nil || token == "" {
 			return
 		}

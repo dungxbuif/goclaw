@@ -925,6 +925,32 @@ func TestMessageToolForward_TagsOriginMetadataOnGroupSend(t *testing.T) {
 	}
 }
 
+func TestMessageToolForward_TagsTrustedContainerScope(t *testing.T) {
+	tool := NewMessageTool(t.TempDir(), false)
+	mb := bus.New()
+	tool.SetMessageBus(mb)
+
+	ctx := context.Background()
+	ctx = WithToolSessionKey(ctx, "agent:a:mezon:group:channel-1")
+	ctx = WithToolChannel(ctx, "mezon-prod")
+	ctx = WithToolChatID(ctx, "channel-1")
+	ctx = WithToolPeerKind(ctx, "group")
+	ctx = store.WithRunContext(ctx, &store.RunContext{Channel: "mezon-prod", ChannelType: "mezon", ContainerID: "clan-1"})
+
+	res := tool.Execute(ctx, map[string]any{
+		"action": "send", "channel": "mezon-prod", "target": "channel-2",
+		"forward": true, "forward_reason": "send to support", "message": "hello",
+		"container_id": "attacker-clan",
+	})
+	if res == nil || res.IsError {
+		t.Fatalf("unexpected result: %#v", res)
+	}
+	got := drainBusNow(mb)
+	if len(got) == 0 || got[0].Metadata[bus.MetaSourceContainerID] != "clan-1" {
+		t.Fatalf("outbound metadata = %#v", got)
+	}
+}
+
 func TestMessageTargetEnforced(t *testing.T) {
 	cases := []struct {
 		key  string
@@ -950,9 +976,9 @@ func TestMessageTargetEnforced(t *testing.T) {
 
 func TestMessageToolEditAction(t *testing.T) {
 	var gotChannel, gotChat, gotContent string
-	var gotMsgID int
+	var gotMsgID string
 	tool := NewMessageTool("", true)
-	tool.SetChannelEditor(func(_ context.Context, ch, chatID string, messageID int, content string) error {
+	tool.SetChannelEditor(func(_ context.Context, ch, chatID string, messageID string, content string) error {
 		gotChannel, gotChat, gotMsgID, gotContent = ch, chatID, messageID, content
 		return nil
 	})
@@ -966,8 +992,8 @@ func TestMessageToolEditAction(t *testing.T) {
 	if r.IsError {
 		t.Fatalf("unexpected error: %s", r.ForLLM)
 	}
-	if gotChannel != "telegram" || gotChat != "-1003995384344" || gotMsgID != 42 {
-		t.Errorf("editor got channel=%q chat=%q msgID=%d, want telegram/-1003995384344/42", gotChannel, gotChat, gotMsgID)
+	if gotChannel != "telegram" || gotChat != "-1003995384344" || gotMsgID != "42" {
+		t.Errorf("editor got channel=%q chat=%q msgID=%s, want telegram/-1003995384344/42", gotChannel, gotChat, gotMsgID)
 	}
 	if gotContent == "" || !strings.Contains(gotContent, "Alice: ✅") {
 		t.Errorf("editor content = %q, want new status text", gotContent)
@@ -976,7 +1002,7 @@ func TestMessageToolEditAction(t *testing.T) {
 
 func TestMessageToolEditRequiresMessageID(t *testing.T) {
 	tool := NewMessageTool("", true)
-	tool.SetChannelEditor(func(_ context.Context, _, _ string, _ int, _ string) error { return nil })
+	tool.SetChannelEditor(func(_ context.Context, _, _, _ string, _ string) error { return nil })
 	r := tool.Execute(context.Background(), map[string]any{
 		"action":  "edit",
 		"channel": "telegram",
@@ -991,7 +1017,7 @@ func TestMessageToolEditRequiresMessageID(t *testing.T) {
 func TestMessageToolEditPrefersContextChannel(t *testing.T) {
 	var gotChannel, gotChat string
 	tool := NewMessageTool("", true)
-	tool.SetChannelEditor(func(_ context.Context, ch, chatID string, _ int, _ string) error {
+	tool.SetChannelEditor(func(_ context.Context, ch, chatID string, _, _ string) error {
 		gotChannel, gotChat = ch, chatID
 		return nil
 	})
@@ -1009,6 +1035,44 @@ func TestMessageToolEditPrefersContextChannel(t *testing.T) {
 	}
 	if gotChannel != "mychan" || gotChat != "-1003995384344" {
 		t.Errorf("editor got channel=%q chat=%q, want mychan/-1003995384344 (context wins)", gotChannel, gotChat)
+	}
+}
+
+func TestMessageToolPreservesLargeStringIDForEditReactAndDelete(t *testing.T) {
+	const messageID = "2088492982985560042"
+	ctx := WithToolChatID(WithToolChannel(context.Background(), "mezon"), "channel-1")
+	tool := NewMessageTool("", true)
+
+	var edited, reacted, deleted string
+	tool.SetChannelEditor(func(_ context.Context, _, _, got, _ string) error { edited = got; return nil })
+	tool.SetReactionSetter(func(_ context.Context, _, _, got, _ string) error { reacted = got; return nil })
+	tool.SetMessageDeleter(func(_ context.Context, _, _, got string) error { deleted = got; return nil })
+
+	for _, args := range []map[string]any{
+		{"action": "edit", "message_id": messageID, "message": "updated"},
+		{"action": "react", "message_id": messageID, "emoji": "👍"},
+		{"action": "delete", "message_id": messageID},
+	} {
+		if result := tool.Execute(ctx, args); result.IsError {
+			t.Fatalf("%s failed: %s", args["action"], result.ForLLM)
+		}
+	}
+	if edited != messageID || reacted != messageID || deleted != messageID {
+		t.Fatalf("IDs lost precision: edit=%q react=%q delete=%q", edited, reacted, deleted)
+	}
+}
+
+func TestMessageToolRejectsUnsafeNumericSnowflake(t *testing.T) {
+	called := false
+	tool := NewMessageTool("", true)
+	tool.SetMessageDeleter(func(context.Context, string, string, string) error { called = true; return nil })
+	ctx := WithToolChatID(WithToolChannel(context.Background(), "mezon"), "channel-1")
+	result := tool.Execute(ctx, map[string]any{"action": "delete", "message_id": float64(2088492982985560042)})
+	if !result.IsError || !strings.Contains(result.ForLLM, "quoted string") {
+		t.Fatalf("result = %#v", result)
+	}
+	if called {
+		t.Fatal("unsafe rounded snowflake reached channel deleter")
 	}
 }
 

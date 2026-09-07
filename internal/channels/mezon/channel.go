@@ -31,6 +31,8 @@ type sdkClient interface {
 	Close()
 	OnChannelMessage(func(*mezonsdk.ChannelMessage)) func()
 	Send(context.Context, string, string) error
+	SendMessage(context.Context, string, string, string, string) (string, error)
+	UpdateMessage(context.Context, string, string, string, string) error
 }
 
 type liveSDKClient struct {
@@ -43,6 +45,47 @@ func (c *liveSDKClient) OnChannelMessage(handler func(*mezonsdk.ChannelMessage))
 	return c.client.OnChannelMessage(handler)
 }
 func (c *liveSDKClient) Send(ctx context.Context, channelID, content string) error {
+	_, err := c.SendMessage(ctx, channelID, content, "", "")
+	return err
+}
+
+func (c *liveSDKClient) SendMessage(ctx context.Context, channelID, content, topicID, replyToID string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	channel, err := c.client.Channels.Fetch(channelID)
+	if err != nil {
+		return "", fmt.Errorf("fetch mezon channel %s: %w", channelID, err)
+	}
+	if channel == nil {
+		return "", fmt.Errorf("fetch mezon channel %s: %w", channelID, errors.New("empty channel"))
+	}
+	var message *mezonsdk.Message
+	if replyToID != "" {
+		if channel.Messages == nil {
+			return "", errors.New("mezon channel message cache unavailable")
+		}
+		source, fetchErr := channel.Messages.Fetch(replyToID)
+		if fetchErr != nil {
+			return "", fmt.Errorf("fetch mezon reply target %s: %w", replyToID, fetchErr)
+		}
+		if source == nil {
+			return "", fmt.Errorf("fetch mezon reply target %s: %w", replyToID, errors.New("empty message"))
+		}
+		message, err = source.Reply(mezonsdk.Text(content), &mezonsdk.SendOptions{TopicID: topicID})
+	} else {
+		message, err = channel.Send(mezonsdk.Text(content), &mezonsdk.SendOptions{TopicID: topicID})
+	}
+	if err != nil {
+		return "", fmt.Errorf("send mezon message: %w", err)
+	}
+	if message == nil {
+		return "", nil
+	}
+	return message.MessageID(), ctx.Err()
+}
+
+func (c *liveSDKClient) UpdateMessage(ctx context.Context, channelID, messageID, content, topicID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -50,23 +93,28 @@ func (c *liveSDKClient) Send(ctx context.Context, channelID, content string) err
 	if err != nil {
 		return fmt.Errorf("fetch mezon channel %s: %w", channelID, err)
 	}
-	if channel == nil {
-		return fmt.Errorf("fetch mezon channel %s: %w", channelID, errors.New("empty channel"))
+	if channel == nil || channel.Messages == nil {
+		return errors.New("mezon channel message cache unavailable")
 	}
-	if _, err := channel.Send(mezonsdk.Text(content), nil); err != nil {
-		return fmt.Errorf("send mezon message: %w", err)
+	message, err := channel.Messages.Fetch(messageID)
+	if err != nil {
+		return fmt.Errorf("fetch mezon message %s: %w", messageID, err)
 	}
-	return ctx.Err()
+	if _, err := message.Update(mezonsdk.Text(content), nil, nil); err != nil {
+		return fmt.Errorf("update mezon message: %w", err)
+	}
+	return nil
 }
 
 // Channel is a GoClaw channel backed by a Mezon bot session.
 type Channel struct {
 	*channels.BaseChannel
-	config      config.MezonConfig
-	client      sdkClient
-	unsubscribe func()
-	stopOnce    sync.Once
-	done        chan struct{}
+	config       config.MezonConfig
+	client       sdkClient
+	placeholders sync.Map
+	unsubscribe  func()
+	stopOnce     sync.Once
+	done         chan struct{}
 }
 
 // New creates a Mezon channel. Network I/O starts in Start.
@@ -165,8 +213,28 @@ func (c *Channel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	if len(msg.Media) > 0 {
 		return fmt.Errorf("%w: mezon", channels.ErrMediaUnsupported)
 	}
-	for _, chunk := range splitOutboundContent(msg.Content) {
-		if err := c.client.Send(ctx, msg.ChatID, chunk); err != nil {
+	topicID := msg.Metadata["topic_id"]
+	chunks := splitOutboundContent(msg.Content)
+	placeholderKey := msg.Metadata["placeholder_key"]
+	placeholderID := ""
+	if placeholderKey != "" {
+		if value, ok := c.placeholders.LoadAndDelete(placeholderKey); ok {
+			placeholderID, _ = value.(string)
+		}
+	}
+	for i, chunk := range chunks {
+		if i == 0 && placeholderID != "" {
+			if err := c.client.UpdateMessage(ctx, msg.ChatID, placeholderID, chunk, topicID); err == nil {
+				continue
+			} else {
+				slog.Warn("mezon: placeholder update failed, sending new message", "message_id", placeholderID, "error", err)
+			}
+		}
+		replyToID := ""
+		if i == 0 {
+			replyToID = placeholderKey
+		}
+		if _, err := c.client.SendMessage(ctx, msg.ChatID, chunk, topicID, replyToID); err != nil {
 			return err
 		}
 	}
@@ -230,9 +298,18 @@ func (c *Channel) handleMessage(message *mezonsdk.ChannelMessage) {
 	if author == "" {
 		author = message.SenderID
 	}
+	// Mezon topics map to Discord-style thread sessions. Keep ChatID as the
+	// real channel ID so outbound delivery still targets the channel, while
+	// local_key scopes the agent session and pending group history to the topic.
+	historyKey := message.ChannelID
+	localKey := ""
+	if !direct && strings.TrimSpace(message.TopicID) != "" && message.TopicID != "0" {
+		localKey = fmt.Sprintf("%s:thread:%s", message.ChannelID, strings.TrimSpace(message.TopicID))
+		historyKey = localKey
+	}
 
 	if !direct && c.RequireMention() && !mentioned {
-		c.GroupHistory().Record(message.ChannelID, channels.HistoryEntry{
+		c.GroupHistory().Record(historyKey, channels.HistoryEntry{
 			Sender:    author,
 			SenderID:  message.SenderID,
 			Body:      content,
@@ -244,7 +321,7 @@ func (c *Channel) handleMessage(message *mezonsdk.ChannelMessage) {
 
 	if !direct {
 		annotated := fmt.Sprintf("[From: %s (@%s)]\n%s", author, message.Username, content)
-		content = c.GroupHistory().BuildContext(message.ChannelID, annotated, c.HistoryLimit())
+		content = c.GroupHistory().BuildContext(historyKey, annotated, c.HistoryLimit())
 	}
 	metadata := map[string]string{
 		"message_id": message.MessageID,
@@ -253,9 +330,25 @@ func (c *Channel) handleMessage(message *mezonsdk.ChannelMessage) {
 		"username":   message.Username,
 		"is_dm":      fmt.Sprintf("%t", direct),
 	}
+	placeholderKey := message.MessageID
+	if placeholderKey == "" {
+		placeholderKey = message.ID
+	}
+	if placeholderKey != "" {
+		if placeholderID, err := c.client.SendMessage(ctx, message.ChannelID, "⏳ Đang xử lý...", strings.TrimSpace(message.TopicID), placeholderKey); err == nil && placeholderID != "" {
+			c.placeholders.Store(placeholderKey, placeholderID)
+			metadata["placeholder_key"] = placeholderKey
+		} else if err != nil {
+			slog.Warn("mezon: placeholder send failed", "channel_id", message.ChannelID, "error", err)
+		}
+	}
+	if localKey != "" {
+		metadata["local_key"] = localKey
+		metadata["topic_id"] = strings.TrimSpace(message.TopicID)
+	}
 	c.HandleAuthorizedMessage(message.SenderID, message.ChannelID, content, nil, metadata, peerKind)
 	if !direct {
-		c.GroupHistory().Clear(message.ChannelID)
+		c.GroupHistory().Clear(historyKey)
 	}
 }
 

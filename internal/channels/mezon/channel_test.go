@@ -634,7 +634,7 @@ func TestGroupTopicUsesIsolatedLocalKeyAndHistory(t *testing.T) {
 	}
 }
 
-func TestMentionedMessageSendsPlaceholderAndFinalEditsIt(t *testing.T) {
+func TestMentionedMessageSendsFinalReplyBeforeRemovingPlaceholder(t *testing.T) {
 	requireMention := true
 	client := &fakeSDKClient{}
 	msgBus := bus.New()
@@ -663,8 +663,18 @@ func TestMentionedMessageSendsPlaceholderAndFinalEditsIt(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("final Send: %v", err)
 	}
-	if len(client.updated) != 1 || client.updated[0].messageID != "placeholder-message-ack" || client.updated[0].content != "final answer" || client.updated[0].topicID != "topic-7" {
-		t.Fatalf("placeholder updates = %+v", client.updated)
+	if len(client.sent) != 2 {
+		t.Fatalf("sends = %+v, want placeholder and final reply", client.sent)
+	}
+	final := client.sent[1]
+	if final.content != "final answer" || final.topicID != "topic-7" || final.replyToID != "message-ack" {
+		t.Fatalf("final send = %+v, want reply to original message in topic", final)
+	}
+	if len(client.updated) != 0 {
+		t.Fatalf("placeholder updates = %+v, want none", client.updated)
+	}
+	if len(client.deleted) != 1 || client.deleted[0].channelID != "channel-1" || client.deleted[0].messageID != "placeholder-message-ack" {
+		t.Fatalf("placeholder deletes = %+v", client.deleted)
 	}
 }
 

@@ -658,26 +658,33 @@ func (c *Channel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	placeholderKey := msg.Metadata["placeholder_key"]
 	placeholderID := ""
 	if placeholderKey != "" {
-		if value, ok := c.placeholders.LoadAndDelete(placeholderKey); ok {
+		if value, ok := c.placeholders.Load(placeholderKey); ok {
 			placeholderID, _ = value.(string)
 		}
 	}
+	firstMessageID := ""
 	for i, chunk := range chunks {
-		if i == 0 && placeholderID != "" {
-			if err := c.client.UpdateMessage(ctx, msg.ChatID, placeholderID, chunk, topicID); err == nil {
-				continue
-			} else {
-				slog.Warn("mezon: placeholder update failed, sending new message", "message_id", placeholderID, "error", err)
-			}
-		}
 		replyToID := ""
 		if i == 0 {
 			replyToID = placeholderKey
 		}
-		if _, err := c.client.SendMessage(ctx, msg.ChatID, chunk, topicID, replyToID); err != nil {
+		messageID, err := c.client.SendMessage(ctx, msg.ChatID, chunk, topicID, replyToID)
+		if err != nil {
 			return err
 		}
+		if i == 0 {
+			firstMessageID = messageID
+		}
 	}
+	if placeholderKey != "" {
+		c.placeholders.Delete(placeholderKey)
+	}
+	if placeholderID != "" {
+		if err := c.client.DeleteOwnMessage(ctx, msg.ChatID, placeholderID); err != nil {
+			slog.Warn("mezon: placeholder cleanup failed", "channel_id", msg.ChatID, "message_id", placeholderID, "error", err)
+		}
+	}
+	slog.Info("mezon: outbound message delivered", "channel_id", msg.ChatID, "message_id", firstMessageID, "topic_id", topicID, "chunks", len(chunks), "replied_to", placeholderKey)
 	return nil
 }
 

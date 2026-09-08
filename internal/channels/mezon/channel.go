@@ -12,12 +12,14 @@ import (
 	"time"
 
 	mezonsdk "github.com/dungxbuif/mezon-sdk-go"
+	"github.com/google/uuid"
 
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
 	"github.com/nextlevelbuilder/goclaw/internal/channels"
 	"github.com/nextlevelbuilder/goclaw/internal/config"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 	"github.com/nextlevelbuilder/goclaw/internal/systemmessages"
+	"github.com/nextlevelbuilder/goclaw/internal/tools"
 )
 
 const (
@@ -42,7 +44,7 @@ type sdkClanDestinationValidator interface {
 }
 
 type sdkInteractiveClient interface {
-	SendInteractive(context.Context, string, channels.InteractiveMessage) (string, error)
+	SendInteractive(context.Context, string, string, channels.InteractiveMessage) (string, error)
 }
 
 type sdkInteraction struct {
@@ -51,12 +53,26 @@ type sdkInteraction struct {
 	ChannelID string
 	MessageID string
 	SenderID  string
+	OwnerID   string
 	ControlID string
 	Values    []string
+	ExtraData string
 }
 
 type sdkInteractionSubscriber interface {
 	OnInteraction(func(*sdkInteraction)) func()
+}
+
+type sdkInteractionSource struct {
+	SenderID    string
+	TopicID     string
+	Text        string
+	ClanName    string
+	ChannelName string
+}
+
+type sdkInteractionSourceFetcher interface {
+	FetchInteractionSource(context.Context, string, string) (sdkInteractionSource, error)
 }
 
 type liveSDKClient struct {
@@ -74,7 +90,7 @@ func (c *liveSDKClient) OnInteraction(handler func(*sdkInteraction)) func() {
 	if handler == nil {
 		return func() {}
 	}
-	dispatch := func(kind, channelID, messageID, senderID, controlID string, values []string) {
+	dispatch := func(kind, channelID, messageID, senderID, ownerID, controlID, extraData string, values []string) {
 		channel, err := c.client.Channels.Fetch(channelID)
 		if err != nil || channel == nil || channel.Clan == nil || channel.Clan.ID == "" || channel.Clan.ID == "0" {
 			slog.Warn("mezon: dropped interaction without trusted clan", "channel_id", channelID, "kind", kind, "error", err)
@@ -82,23 +98,44 @@ func (c *liveSDKClient) OnInteraction(handler func(*sdkInteraction)) func() {
 		}
 		handler(&sdkInteraction{
 			Kind: kind, ClanID: channel.Clan.ID, ChannelID: channelID, MessageID: messageID,
-			SenderID: senderID, ControlID: controlID, Values: append([]string(nil), values...),
+			SenderID: senderID, OwnerID: ownerID, ControlID: controlID,
+			Values: append([]string(nil), values...), ExtraData: extraData,
 		})
 	}
 	unsubButton := c.client.OnMessageButtonClicked(func(event *mezonsdk.MessageButtonClick) {
 		if event != nil {
-			dispatch("button", event.ChannelID, event.MessageID, event.SenderID, event.ButtonID, nil)
+			dispatch("button", event.ChannelID, event.MessageID, event.SenderID, event.UserID, event.ButtonID, event.ExtraData, nil)
 		}
 	})
 	unsubSelect := c.client.OnDropdownBoxSelected(func(event *mezonsdk.DropdownBoxSelect) {
 		if event != nil {
-			dispatch("select", event.ChannelID, event.MessageID, event.SenderID, event.SelectID, event.Values)
+			dispatch("select", event.ChannelID, event.MessageID, event.SenderID, event.UserID, event.SelectID, "", event.Values)
 		}
 	})
 	return func() {
 		unsubButton()
 		unsubSelect()
 	}
+}
+
+func (c *liveSDKClient) FetchInteractionSource(ctx context.Context, channelID, messageID string) (sdkInteractionSource, error) {
+	message, err := c.fetchMessage(ctx, channelID, messageID)
+	if err != nil {
+		return sdkInteractionSource{}, err
+	}
+	source := sdkInteractionSource{SenderID: message.SenderID, TopicID: strings.TrimSpace(message.TopicID)}
+	parsed := mezonsdk.ParseContent(message.Content)
+	source.Text = strings.TrimSpace(parsed.Text)
+	if source.Text == "" && len(message.Content) > 0 {
+		source.Text = strings.TrimSpace(string(message.Content))
+	}
+	if message.Channel != nil {
+		source.ChannelName = strings.TrimSpace(message.Channel.Name)
+		if message.Channel.Clan != nil {
+			source.ClanName = strings.TrimSpace(message.Channel.Clan.Name)
+		}
+	}
+	return source, nil
 }
 func (c *liveSDKClient) Send(ctx context.Context, channelID, content string) error {
 	_, err := c.SendMessage(ctx, channelID, content, "", "")
@@ -141,7 +178,7 @@ func (c *liveSDKClient) SendMessage(ctx context.Context, channelID, content, top
 	return message.MessageID(), ctx.Err()
 }
 
-func (c *liveSDKClient) SendInteractive(ctx context.Context, channelID string, spec channels.InteractiveMessage) (string, error) {
+func (c *liveSDKClient) SendInteractive(ctx context.Context, channelID, topicID string, spec channels.InteractiveMessage) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -156,7 +193,7 @@ func (c *liveSDKClient) SendInteractive(ctx context.Context, channelID string, s
 	if err != nil {
 		return "", err
 	}
-	message, err := channel.Send(content, nil)
+	message, err := channel.Send(content, &mezonsdk.SendOptions{TopicID: topicID})
 	if err != nil {
 		return "", fmt.Errorf("send mezon interactive message: %w", err)
 	}
@@ -367,6 +404,8 @@ type Channel struct {
 	*channels.BaseChannel
 	config           config.MezonConfig
 	client           sdkClient
+	agentStore       mezonAgentStore
+	configPermStore  store.ConfigPermissionStore
 	placeholders     sync.Map
 	catalogRefreshMu sync.Mutex
 	catalogRefreshed map[string]time.Time
@@ -416,6 +455,14 @@ func (c *Channel) BlockReplyEnabled() *bool { return c.config.BlockReply }
 // ChatBehaviorConfig returns the per-channel chat_behavior override.
 func (c *Channel) ChatBehaviorConfig() *config.ChatBehaviorConfig { return c.config.ChatBehavior }
 
+// SetPendingHistoryTenantID propagates the DB instance tenant to Mezon's
+// pending group history, which is constructed before InstanceLoader assigns it.
+func (c *Channel) SetPendingHistoryTenantID(id uuid.UUID) {
+	if gh := c.GroupHistory(); gh != nil {
+		gh.SetTenantID(id)
+	}
+}
+
 func (c *Channel) EditMessage(ctx context.Context, chatID, messageID, content string) error {
 	return c.client.UpdateMessage(ctx, chatID, messageID, content, "")
 }
@@ -445,7 +492,15 @@ func (c *Channel) SendInteractiveMessage(ctx context.Context, chatID, clanID str
 	if !ok {
 		return "", errors.New("mezon SDK client does not support interactive messages")
 	}
-	return client.SendInteractive(ctx, chatID, message)
+	return client.SendInteractive(ctx, chatID, mezonTopicFromLocalKey(chatID, tools.ToolLocalKeyFromCtx(ctx)), message)
+}
+
+func mezonTopicFromLocalKey(channelID, localKey string) string {
+	prefix := channelID + ":thread:"
+	if strings.HasPrefix(localKey, prefix) {
+		return strings.TrimSpace(strings.TrimPrefix(localKey, prefix))
+	}
+	return ""
 }
 
 // Start authenticates and opens the Mezon realtime session.
@@ -492,25 +547,53 @@ func (c *Channel) handleInteraction(event *sdkInteraction) {
 		return
 	}
 	ctx := store.WithTenantID(context.Background(), c.TenantID())
+	// Mezon broadcasts component events visible to the bot. Accept only events
+	// addressed to this bot and independently verify the source message owner.
+	if event.OwnerID != c.config.BotID {
+		return
+	}
+	fetcher, ok := c.client.(sdkInteractionSourceFetcher)
+	if !ok {
+		slog.Warn("mezon: dropped interaction without source verification", "channel_id", event.ChannelID, "message_id", event.MessageID)
+		return
+	}
+	source, err := fetcher.FetchInteractionSource(ctx, event.ChannelID, event.MessageID)
+	if err != nil || source.SenderID != c.config.BotID {
+		slog.Warn("mezon: dropped interaction from unowned source", "channel_id", event.ChannelID, "message_id", event.MessageID, "error", err)
+		return
+	}
 	policyMessage := &mezonsdk.ChannelMessage{SenderID: event.SenderID, ChannelID: event.ChannelID, ClanID: event.ClanID}
 	if !c.policyAllows(ctx, policyMessage, false, true) {
 		return
 	}
-	content := fmt.Sprintf("User activated Mezon %s %q on message %q.", event.Kind, event.ControlID, event.MessageID)
+	content := fmt.Sprintf("User activated Mezon %s %q on bot message %q.", event.Kind, event.ControlID, event.MessageID)
 	if len(event.Values) > 0 {
 		values, _ := json.Marshal(event.Values)
 		content = fmt.Sprintf("User selected Mezon %s %q with values %s on message %q.", event.Kind, event.ControlID, values, event.MessageID)
 	}
+	if source.Text != "" {
+		content += "\nOriginal interactive message: " + truncateInteractionContext(source.Text, 1000)
+	}
 	metadata := map[string]string{
 		"message_id": event.MessageID, "channel_id": event.ChannelID, "clan_id": event.ClanID,
 		"is_dm": "false", "interaction_type": event.Kind, "interaction_id": event.ControlID,
+	}
+	if event.ExtraData != "" {
+		metadata["interaction_extra_data"] = event.ExtraData
+	}
+	if source.TopicID != "" && source.TopicID != "0" {
+		metadata["topic_id"] = source.TopicID
+		metadata["local_key"] = fmt.Sprintf("%s:thread:%s", event.ChannelID, source.TopicID)
+	}
+	if title := mezonChatTitle(source.ClanName, source.ChannelName); title != "" {
+		metadata[tools.MetaChatTitle] = title
 	}
 	if len(event.Values) > 0 {
 		values, _ := json.Marshal(event.Values)
 		metadata["interaction_values"] = string(values)
 	}
 	if event.MessageID != "" {
-		if placeholderID, err := c.client.SendMessage(ctx, event.ChannelID, "⏳ Đang xử lý...", "", event.MessageID); err == nil && placeholderID != "" {
+		if placeholderID, err := c.client.SendMessage(ctx, event.ChannelID, "⏳ Đang xử lý...", source.TopicID, event.MessageID); err == nil && placeholderID != "" {
 			c.placeholders.Store(event.MessageID, placeholderID)
 			metadata["placeholder_key"] = event.MessageID
 		} else if err != nil {
@@ -518,6 +601,26 @@ func (c *Channel) handleInteraction(event *sdkInteraction) {
 		}
 	}
 	c.HandleAuthorizedMessage(event.SenderID, event.ChannelID, content, nil, metadata, "group")
+}
+
+func truncateInteractionContext(value string, max int) string {
+	runes := []rune(strings.TrimSpace(value))
+	if len(runes) <= max {
+		return string(runes)
+	}
+	return string(runes[:max]) + "…"
+}
+
+func mezonChatTitle(clanName, channelName string) string {
+	clanName = strings.TrimSpace(clanName)
+	channelName = strings.TrimSpace(channelName)
+	if clanName != "" && channelName != "" {
+		return clanName + " / " + channelName
+	}
+	if channelName != "" {
+		return channelName
+	}
+	return clanName
 }
 
 // Stop closes the Mezon session and releases event handlers.
@@ -634,6 +737,9 @@ func (c *Channel) handleMessage(message *mezonsdk.ChannelMessage) {
 	}
 	ctx := store.WithTenantID(context.Background(), c.TenantID())
 	direct := message.ClanID == "" || message.ClanID == "0" || message.Mode == int32(mezonsdk.StreamModeDM)
+	if c.tryHandleCronCommand(ctx, message, direct) {
+		return
+	}
 	peerKind := "group"
 	if direct {
 		peerKind = "direct"
@@ -689,6 +795,9 @@ func (c *Channel) handleMessage(message *mezonsdk.ChannelMessage) {
 		"display_name": author,
 		"username":     message.Username,
 		"is_dm":        fmt.Sprintf("%t", direct),
+	}
+	if title := strings.TrimSpace(message.ChannelLabel); title != "" {
+		metadata[tools.MetaChatTitle] = title
 	}
 	placeholderKey := message.MessageID
 	if placeholderKey == "" {

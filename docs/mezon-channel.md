@@ -148,12 +148,34 @@ adapter does not advertise or synthesize grid payloads.
 ```
 
 Button-click and dropdown-selection events are converted into ordinary inbound
-user turns. The adapter verifies the event channel resolves to a non-DM clan,
-applies group policy, replies with a processing placeholder to the component's
-source message, and keeps `clan_id`, component ID, values, and the exact source
-message ID in trusted metadata. The final agent response therefore replies in
-the same clan channel. Events from DMs, unknown channels, or the bot itself are
+user turns. The adapter verifies both the event's owner ID and the fetched
+source message belong to the current bot before applying group policy. It adds
+the original card text and component extra data to the turn, and preserves the
+source topic as `topic_id` and `local_key`. Rich cards, processing placeholders,
+and final replies therefore remain in the same clan channel and topic, including
+after a process restart because source-message state is recovered from the SDK
+cache/API. Events from DMs, unknown channels, other bots, or the bot itself are
 dropped.
+
+Normal inbound messages publish the Mezon channel label as `chat_title`; rich
+component callbacks publish `clan / channel` when both names are available.
+DB-backed pending group history receives the channel instance tenant before the
+flusher starts, so unmentioned clan context is isolated and survives restarts.
+
+## Cron permissions in clan channels
+
+Cron mutations remain denied by default in group conversations. They are not
+Web-UI-only: Mezon operators can manage the channel-scoped allowlist directly:
+
+- Reply to a user's message with `/addcron` to grant cron access.
+- Reply to a user's message with `/removecron` to revoke it.
+- Send `/croners` to list explicit cron managers. File writers are also shown
+  as having implicit cron access.
+
+The first `/addcron` caller bootstraps an empty allowlist. Once any cron manager
+or file writer exists, only an existing manager can change it. Permissions use
+the exact scope `group:<mezon instance>:<channel id>` and do not apply globally
+to the clan or other channels.
 
 ## Current limitations
 

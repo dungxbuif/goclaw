@@ -4,6 +4,27 @@ Significant changes, features, and fixes in reverse chronological order.
 
 ---
 
+## 2026-09-08
+
+### Mezon context continuity and operational hardening
+
+**Fixes**
+
+- Preserved Mezon topic sessions across rich-card creation, component callbacks,
+  processing placeholders, and final replies.
+- Verified callback and source-message ownership before accepting interactive
+  events, and supplied the agent with source-card context and channel names.
+- Propagated tenant identity to DB-backed Mezon pending history.
+- Added channel-scoped `/addcron`, `/removecron`, and `/croners` commands.
+
+**Tests**
+
+- Added regressions for interaction ownership, topic routing, semantic context,
+  channel titles, pending-history tenant isolation, cron bootstrap, rich-tool
+  discoverability, and cron permission management.
+
+---
+
 ## 2026-09-07
 
 ### Scoped channel capability discovery

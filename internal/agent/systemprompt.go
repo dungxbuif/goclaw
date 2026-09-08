@@ -203,6 +203,7 @@ var coreToolSummaries = map[string]string{
 	"tts":                    "Convert text to speech audio",
 	"edit":                   "Edit a file by replacing exact text matches",
 	"message":                "Send a PROACTIVE message to another channel/chat — do NOT use this to reply to the user, just respond directly",
+	"mezon_interactive":      "Send a rich Mezon message with embeds, buttons, forms, selects, radio choices, dates, or animations; use when structured user interaction is clearer than plain text",
 	"sessions_list":          "List sessions for this agent",
 	"session_status":         "Show session status (model, tokens, compaction count)",
 	"sessions_history":       "Fetch message history for a session",

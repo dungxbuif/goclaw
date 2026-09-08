@@ -100,6 +100,12 @@ All notable changes to GoClaw are documented here. For full documentation, see [
 
 ### Fixed
 
+- **Mezon contextual interactions and cron administration** — Interactive
+  callbacks now verify bot ownership, recover source-card text, preserve topic
+  routing and channel names, and reject events emitted for another bot's card.
+  DB-backed pending history now receives its tenant before use. Clan channels
+  can bootstrap and manage scoped cron access with `/addcron`, `/removecron`,
+  and `/croners` instead of incorrectly directing every user to the Web UI.
 - **Mezon cross-clan outbound isolation** — Propagates the authenticated inbound
   clan through run context and rejects model-triggered sends or updates whose
   destination channel belongs to another clan. Clan/group deliveries without a

@@ -79,7 +79,20 @@ func buildChannel(name string, credentials, rawConfig json.RawMessage, msgBus *b
 
 // FactoryWithPendingStore returns a DB factory with persistent group history.
 func FactoryWithPendingStore(pendingStore store.PendingMessageStore) channels.ChannelFactory {
+	return FactoryWithStores(nil, nil, pendingStore)
+}
+
+// FactoryWithStores returns a Mezon factory with agent lookup, scoped cron
+// permissions, and persistent pending group history.
+func FactoryWithStores(agentStore store.AgentStore, configPermStore store.ConfigPermissionStore, pendingStore store.PendingMessageStore) channels.ChannelFactory {
 	return func(name string, credentials, rawConfig json.RawMessage, msgBus *bus.MessageBus, pairingSvc store.PairingStore) (channels.Channel, error) {
-		return buildChannel(name, credentials, rawConfig, msgBus, pairingSvc, pendingStore)
+		built, err := buildChannel(name, credentials, rawConfig, msgBus, pairingSvc, pendingStore)
+		if err != nil {
+			return nil, err
+		}
+		channel := built.(*Channel)
+		channel.agentStore = agentStore
+		channel.configPermStore = configPermStore
+		return channel, nil
 	}
 }

@@ -10,10 +10,13 @@ import (
 	"time"
 
 	mezonsdk "github.com/dungxbuif/mezon-sdk-go"
+	"github.com/google/uuid"
 
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
 	"github.com/nextlevelbuilder/goclaw/internal/channels"
 	"github.com/nextlevelbuilder/goclaw/internal/config"
+	"github.com/nextlevelbuilder/goclaw/internal/store"
+	"github.com/nextlevelbuilder/goclaw/internal/tools"
 )
 
 type fakeSDKClient struct {
@@ -30,6 +33,8 @@ type fakeSDKClient struct {
 	deleted            []fakeSDKDelete
 	interactiveHandler func(*sdkInteraction)
 	interactive        []channels.InteractiveMessage
+	interactiveTopics  []string
+	interactionSources map[string]sdkInteractionSource
 }
 
 type fakeSDKReaction struct{ channelID, messageID, emoji string }
@@ -56,11 +61,35 @@ func (f *fakeSDKClient) OnInteraction(handler func(*sdkInteraction)) func() {
 	}
 }
 
-func (f *fakeSDKClient) SendInteractive(_ context.Context, _ string, message channels.InteractiveMessage) (string, error) {
+func (f *fakeSDKClient) FetchInteractionSource(_ context.Context, channelID, messageID string) (sdkInteractionSource, error) {
+	source, ok := f.interactionSources[channelID+":"+messageID]
+	if !ok {
+		return sdkInteractionSource{}, errors.New("source message not found")
+	}
+	return source, nil
+}
+
+func (f *fakeSDKClient) SendInteractive(_ context.Context, _ string, topicID string, message channels.InteractiveMessage) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.interactive = append(f.interactive, message)
+	f.interactiveTopics = append(f.interactiveTopics, topicID)
 	return "interactive-1876543210987654321", nil
+}
+
+func TestInteractiveMessageStaysInsideCurrentMezonTopic(t *testing.T) {
+	client := &fakeSDKClient{channelClans: map[string]string{"channel-1": "clan-1"}}
+	channel := newWithClient(testMezonConfig(), bus.New(), nil, nil, client)
+	channel.SetRunning(true)
+	ctx := tools.WithToolLocalKey(context.Background(), "channel-1:thread:topic-7")
+	if _, err := channel.SendInteractiveMessage(ctx, "channel-1", "clan-1", channels.InteractiveMessage{
+		Text: "Approve?", ButtonRows: [][]channels.InteractiveButton{{{ID: "yes", Label: "Yes"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.interactiveTopics) != 1 || client.interactiveTopics[0] != "topic-7" {
+		t.Fatalf("interactive topics = %#v", client.interactiveTopics)
+	}
 }
 
 func (f *fakeSDKClient) ValidateClanDestination(_ context.Context, channelID, clanID string) error {
@@ -185,14 +214,22 @@ func TestBuildInteractiveContentCoversNativeComponentShapes(t *testing.T) {
 
 func TestInteractionPublishesClanScopedInboundAndRepliesToClickedMessage(t *testing.T) {
 	mb := bus.New()
-	client := &fakeSDKClient{channelClans: map[string]string{"channel-1": "clan-1"}}
+	client := &fakeSDKClient{
+		channelClans: map[string]string{"channel-1": "clan-1"},
+		interactionSources: map[string]sdkInteractionSource{
+			"channel-1:1876543210987654321": {
+				SenderID: "bot-1", TopicID: "topic-7", Text: "Approve deployment?",
+				ClanName: "Production", ChannelName: "release-control",
+			},
+		},
+	}
 	channel := newWithClient(testMezonConfig(), mb, nil, nil, client)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if err := channel.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	client.emitInteraction(&sdkInteraction{Kind: "button", ClanID: "clan-1", ChannelID: "channel-1", MessageID: "1876543210987654321", SenderID: "user-1", ControlID: "confirm"})
+	client.emitInteraction(&sdkInteraction{Kind: "button", ClanID: "clan-1", ChannelID: "channel-1", MessageID: "1876543210987654321", SenderID: "user-1", OwnerID: "bot-1", ControlID: "confirm", ExtraData: `{"action":"deploy"}`})
 
 	readCtx, readCancel := context.WithTimeout(context.Background(), time.Second)
 	defer readCancel()
@@ -203,13 +240,104 @@ func TestInteractionPublishesClanScopedInboundAndRepliesToClickedMessage(t *test
 	if inbound.ChatID != "channel-1" || inbound.SenderID != "user-1" || inbound.Metadata["clan_id"] != "clan-1" || inbound.Metadata["interaction_id"] != "confirm" {
 		t.Fatalf("inbound = %#v", inbound)
 	}
-	if !strings.Contains(inbound.Content, "button") || !strings.Contains(inbound.Content, "confirm") {
+	if inbound.Metadata["topic_id"] != "topic-7" || inbound.Metadata["local_key"] != "channel-1:thread:topic-7" {
+		t.Fatalf("topic metadata = %#v", inbound.Metadata)
+	}
+	if inbound.Metadata[tools.MetaChatTitle] != "Production / release-control" || inbound.Metadata["interaction_extra_data"] != `{"action":"deploy"}` {
+		t.Fatalf("semantic metadata = %#v", inbound.Metadata)
+	}
+	if !strings.Contains(inbound.Content, "confirm") || !strings.Contains(inbound.Content, "Approve deployment?") {
 		t.Fatalf("content = %q", inbound.Content)
 	}
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	if len(client.sent) != 1 || client.sent[0].replyToID != "1876543210987654321" {
+	if len(client.sent) != 1 || client.sent[0].replyToID != "1876543210987654321" || client.sent[0].topicID != "topic-7" {
 		t.Fatalf("placeholder replies = %#v", client.sent)
+	}
+}
+
+func TestInteractionRejectsComponentsNotOwnedByBot(t *testing.T) {
+	mb := bus.New()
+	client := &fakeSDKClient{interactionSources: map[string]sdkInteractionSource{
+		"channel-1:message-1": {SenderID: "other-bot", Text: "Untrusted action"},
+	}}
+	channel := newWithClient(testMezonConfig(), mb, nil, nil, client)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := channel.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	client.emitInteraction(&sdkInteraction{Kind: "button", ClanID: "clan-1", ChannelID: "channel-1", MessageID: "message-1", SenderID: "user-1", OwnerID: "other-bot", ControlID: "confirm"})
+
+	readCtx, readCancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer readCancel()
+	if _, ok := mb.ConsumeInbound(readCtx); ok {
+		t.Fatal("interaction from another bot reached inbound bus")
+	}
+}
+
+func TestGroupMessageCarriesMezonChannelTitle(t *testing.T) {
+	mb := bus.New()
+	client := &fakeSDKClient{}
+	channel := newWithClient(testMezonConfig(), mb, nil, nil, client)
+	if err := channel.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = channel.Stop(context.Background()) })
+	client.emit(&mezonsdk.ChannelMessage{
+		MessageID: "message-1", ChannelID: "channel-1", ChannelLabel: "release-control", ClanID: "clan-1",
+		SenderID: "user-1", Username: "alice", Content: []byte(`{"t":"hello"}`), Mode: int32(mezonsdk.StreamModeChannel),
+		Mentions: []mezonsdk.Mention{{UserID: "bot-1", Username: "bot"}},
+	})
+	readCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	inbound, ok := mb.ConsumeInbound(readCtx)
+	if !ok || inbound.Metadata[tools.MetaChatTitle] != "release-control" {
+		t.Fatalf("inbound = %#v", inbound)
+	}
+}
+
+type tenantCapturePendingStore struct{ tenant uuid.UUID }
+
+func (s *tenantCapturePendingStore) AppendBatch(ctx context.Context, _ []store.PendingMessage) error {
+	s.tenant = store.TenantIDFromContext(ctx)
+	return nil
+}
+func (s *tenantCapturePendingStore) ListByKey(context.Context, string, string) ([]store.PendingMessage, error) {
+	return nil, nil
+}
+func (s *tenantCapturePendingStore) DeleteByKey(ctx context.Context, _, _ string) error {
+	s.tenant = store.TenantIDFromContext(ctx)
+	return nil
+}
+func (s *tenantCapturePendingStore) Compact(context.Context, []uuid.UUID, *store.PendingMessage) error {
+	return nil
+}
+func (s *tenantCapturePendingStore) DeleteStale(context.Context, time.Duration) (int64, error) {
+	return 0, nil
+}
+func (s *tenantCapturePendingStore) ListArchivedByKey(context.Context, string, string, time.Time, int) ([]store.ArchivedMessage, error) {
+	return nil, nil
+}
+func (s *tenantCapturePendingStore) ListGroups(context.Context) ([]store.PendingMessageGroup, error) {
+	return nil, nil
+}
+func (s *tenantCapturePendingStore) CountAll(context.Context) (int64, error) { return 0, nil }
+func (s *tenantCapturePendingStore) CountByKey(context.Context, string, string) (int, error) {
+	return 0, nil
+}
+func (s *tenantCapturePendingStore) ResolveGroupTitles(context.Context, []store.PendingMessageGroup) (map[string]string, error) {
+	return nil, nil
+}
+
+func TestSetPendingHistoryTenantIDScopesMezonPersistence(t *testing.T) {
+	pending := &tenantCapturePendingStore{}
+	channel := newWithClient(testMezonConfig(), bus.New(), nil, pending, &fakeSDKClient{})
+	tenantID := uuid.New()
+	channel.SetPendingHistoryTenantID(tenantID)
+	channel.GroupHistory().Clear("channel-1")
+	if pending.tenant != tenantID {
+		t.Fatalf("pending history tenant = %s, want %s", pending.tenant, tenantID)
 	}
 }
 

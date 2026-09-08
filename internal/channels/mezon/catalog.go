@@ -28,6 +28,28 @@ type sdkChannelCatalogClient interface {
 	ListChannels(context.Context, string, bool) ([]sdkCatalogEntry, error)
 }
 
+type sdkChannelContextClient interface {
+	ResolveChannel(context.Context, string) (sdkCatalogEntry, error)
+}
+
+func (c *liveSDKClient) ResolveChannel(ctx context.Context, channelID string) (sdkCatalogEntry, error) {
+	if err := ctx.Err(); err != nil {
+		return sdkCatalogEntry{}, err
+	}
+	channel, err := c.client.Channels.Fetch(channelID)
+	if err != nil {
+		return sdkCatalogEntry{}, err
+	}
+	if channel == nil {
+		return sdkCatalogEntry{}, fmt.Errorf("mezon channel %q is empty", channelID)
+	}
+	entry := sdkCatalogEntry{ChannelID: channel.ID, Name: channel.Name, Type: channel.ChannelType, CategoryID: channel.CategoryID, CategoryName: channel.CategoryName, ParentID: channel.ParentID, Private: channel.IsPrivate}
+	if channel.Clan != nil {
+		entry.ClanID, entry.ClanName = channel.Clan.ID, channel.Clan.Name
+	}
+	return entry, nil
+}
+
 func (c *liveSDKClient) ListChannels(ctx context.Context, clanID string, refresh bool) ([]sdkCatalogEntry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

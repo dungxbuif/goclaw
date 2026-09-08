@@ -24,6 +24,7 @@ type mezonInstanceConfig struct {
 	GroupPolicy    string                     `json:"group_policy,omitempty"`
 	RequireMention *bool                      `json:"require_mention,omitempty"`
 	HistoryLimit   *int                       `json:"history_limit,omitempty"`
+	MediaMaxBytes  int64                      `json:"media_max_bytes,omitempty"`
 	BlockReply     *bool                      `json:"block_reply,omitempty"`
 	ChatBehavior   *config.ChatBehaviorConfig `json:"chat_behavior,omitempty"`
 }
@@ -66,6 +67,7 @@ func buildChannel(name string, credentials, rawConfig json.RawMessage, msgBus *b
 		GroupPolicy:    groupPolicy,
 		RequireMention: instance.RequireMention,
 		HistoryLimit:   historyLimit,
+		MediaMaxBytes:  instance.MediaMaxBytes,
 		BlockReply:     instance.BlockReply,
 		ChatBehavior:   instance.ChatBehavior,
 	}, msgBus, pairingSvc, pendingStore)

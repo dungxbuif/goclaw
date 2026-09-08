@@ -197,6 +197,8 @@ github.com/dop251/goja v0.0.0-20260311135729-065cd970411c h1:OcLmPfx1T1RmZVHHFwW
 github.com/dop251/goja v0.0.0-20260311135729-065cd970411c/go.mod h1:MxLav0peU43GgvwVgNbLAj1s/bSGboKkhuULvq/7hx4=
 github.com/dungxbuif/mezon-sdk-go v0.0.0-20260906234750-248767c54918 h1:gcAUoUevLa4czUh1eytnRn9BUC9pjb4mgjwVfVZv3j8=
 github.com/dungxbuif/mezon-sdk-go v0.0.0-20260906234750-248767c54918/go.mod h1:4FDhiEX/hzX4xUtyAtUUyIKOhezkFf8dOjq2VF07G6k=
+github.com/dungxbuif/mezon-sdk-go v0.0.0-20260908081443-07d88507071d h1:p4g5P6RFAIf2bB6Dvuu5NmqY466ehQdxV526kYFJan4=
+github.com/dungxbuif/mezon-sdk-go v0.0.0-20260908081443-07d88507071d/go.mod h1:4FDhiEX/hzX4xUtyAtUUyIKOhezkFf8dOjq2VF07G6k=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
 github.com/elliotchance/orderedmap/v3 v3.1.0 h1:j4DJ5ObEmMBt/lcwIecKcoRxIQUEnw0L804lXYDt/pg=

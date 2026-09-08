@@ -19,6 +19,13 @@ Significant changes, features, and fixes in reverse chronological order.
 
 **Fixes**
 
+- Added referenced-message context and server-backed topic history so the agent
+  can recover conversation state after restart instead of relying only on local
+  pending messages.
+- Added bounded inbound attachment handling with MIME/filename preservation,
+  native markdown spans for ordinary replies, HTTPS URL attachments, and named
+  channel/category context for passive memory extraction.
+
 - Preserved Mezon topic sessions across rich-card creation, component callbacks,
   processing placeholders, and final replies.
 - Verified callback and source-message ownership before accepting interactive

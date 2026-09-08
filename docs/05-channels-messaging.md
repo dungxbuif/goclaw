@@ -914,9 +914,10 @@ The bot app must have the `imbot` scope granted. The `disk` scope is **not** req
 
 The Mezon adapter uses `github.com/dungxbuif/mezon-sdk-go` and the realtime
 gateway. It supports config-based startup and encrypted `channel_instances`
-credentials, interactive cards, and component callbacks. See
+credentials, reply/topic context recovery, inbound attachments, native markdown,
+HTTPS URL attachments, interactive cards, and component callbacks. See
 [Mezon channel](mezon-channel.md) for configuration, policy, routing, lifecycle,
-interactive schemas, and current media limitations.
+interactive schemas, context behavior, and current local-upload limitation.
 | Audio / STT | `internal/audio/` | Audio manager, STT chain resolution, legacy STT bridge |
 | Pairing & routing | `internal/store/pg/pairing.go`, `cmd/gateway_consumer.go` | Pairing code persistence, inbound message routing and cancel interception |
 

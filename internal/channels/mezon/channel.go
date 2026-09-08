@@ -47,6 +47,14 @@ type sdkInteractiveClient interface {
 	SendInteractive(context.Context, string, string, channels.InteractiveMessage) (string, error)
 }
 
+type sdkHistoryClient interface {
+	ListChannelMessages(context.Context, string, string, string, string, int32) ([]*mezonsdk.ChannelMessage, error)
+}
+
+type sdkContentClient interface {
+	SendContent(context.Context, string, mezonsdk.Content, []mezonsdk.Attachment, string, string) (string, error)
+}
+
 type sdkInteraction struct {
 	Kind      string
 	ClanID    string
@@ -142,7 +150,15 @@ func (c *liveSDKClient) Send(ctx context.Context, channelID, content string) err
 	return err
 }
 
+func (c *liveSDKClient) ListChannelMessages(ctx context.Context, clanID, channelID, beforeID, topicID string, limit int32) ([]*mezonsdk.ChannelMessage, error) {
+	return c.client.ListChannelMessagesContext(ctx, clanID, channelID, beforeID, topicID, limit)
+}
+
 func (c *liveSDKClient) SendMessage(ctx context.Context, channelID, content, topicID, replyToID string) (string, error) {
+	return c.SendContent(ctx, channelID, mezonsdk.Text(content), nil, topicID, replyToID)
+}
+
+func (c *liveSDKClient) SendContent(ctx context.Context, channelID string, content mezonsdk.Content, attachments []mezonsdk.Attachment, topicID, replyToID string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -165,9 +181,9 @@ func (c *liveSDKClient) SendMessage(ctx context.Context, channelID, content, top
 		if source == nil {
 			return "", fmt.Errorf("fetch mezon reply target %s: %w", replyToID, errors.New("empty message"))
 		}
-		message, err = source.Reply(mezonsdk.Text(content), &mezonsdk.SendOptions{TopicID: topicID})
+		message, err = source.Reply(content, &mezonsdk.SendOptions{TopicID: topicID, Attachments: attachments})
 	} else {
-		message, err = channel.Send(mezonsdk.Text(content), &mezonsdk.SendOptions{TopicID: topicID})
+		message, err = channel.Send(content, &mezonsdk.SendOptions{TopicID: topicID, Attachments: attachments})
 	}
 	if err != nil {
 		return "", fmt.Errorf("send mezon message: %w", err)
@@ -647,10 +663,11 @@ func (c *Channel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	if msg.ChatID == "" {
 		return errors.New("empty chat ID for mezon send")
 	}
-	if len(msg.Media) > 0 {
-		return fmt.Errorf("%w: mezon", channels.ErrMediaUnsupported)
-	}
 	if err := c.validateOutboundClan(ctx, msg); err != nil {
+		return err
+	}
+	attachments, err := mezonOutboundAttachments(msg.Media)
+	if err != nil {
 		return err
 	}
 	topicID := msg.Metadata["topic_id"]
@@ -668,7 +685,19 @@ func (c *Channel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 		if i == 0 {
 			replyToID = placeholderKey
 		}
-		messageID, err := c.client.SendMessage(ctx, msg.ChatID, chunk, topicID, replyToID)
+		var messageID string
+		if rich, ok := c.client.(sdkContentClient); ok {
+			chunkAttachments := attachments
+			if i > 0 {
+				chunkAttachments = nil
+			}
+			messageID, err = rich.SendContent(ctx, msg.ChatID, mezonMarkdownContent(chunk), chunkAttachments, topicID, replyToID)
+		} else {
+			if len(attachments) > 0 {
+				return fmt.Errorf("%w: mezon client does not support attachments", channels.ErrMediaUnsupported)
+			}
+			messageID, err = c.client.SendMessage(ctx, msg.ChatID, chunk, topicID, replyToID)
+		}
 		if err != nil {
 			return err
 		}
@@ -715,7 +744,7 @@ func splitOutboundContent(content string) []string {
 	out := make([]string, 0, len(initial))
 	var appendSafe func(string)
 	appendSafe = func(chunk string) {
-		encoded, err := json.Marshal(mezonsdk.Text(chunk))
+		encoded, err := json.Marshal(mezonMarkdownContent(chunk))
 		if err == nil && mezonsdk.UTF16Len(string(encoded)) <= maxContentWireUnits {
 			out = append(out, chunk)
 			return
@@ -760,6 +789,7 @@ func (c *Channel) handleMessage(message *mezonsdk.ChannelMessage) {
 	if content == "" {
 		content = "[empty message]"
 	}
+	content = withMezonReplyContext(message, content)
 	author := strings.TrimSpace(message.DisplayName)
 	if author == "" {
 		author = strings.TrimSpace(message.ClanNick)
@@ -790,10 +820,17 @@ func (c *Channel) handleMessage(message *mezonsdk.ChannelMessage) {
 		}, c.HistoryLimit())
 		return
 	}
+	mediaFiles, mediaContext := resolveMezonAttachments(ctx, message.Attachments, c.config.MediaMaxBytes)
+	if mediaContext != "" {
+		content = mediaContext + "\n\n" + content
+	}
 
 	if !direct {
 		annotated := fmt.Sprintf("[From: %s (@%s)]\n%s", author, message.Username, content)
 		content = c.GroupHistory().BuildContext(historyKey, annotated, c.HistoryLimit())
+		if localKey != "" {
+			content = c.withTopicHistory(ctx, message, content)
+		}
 	}
 	metadata := map[string]string{
 		"message_id":   message.MessageID,
@@ -806,6 +843,7 @@ func (c *Channel) handleMessage(message *mezonsdk.ChannelMessage) {
 	if title := strings.TrimSpace(message.ChannelLabel); title != "" {
 		metadata[tools.MetaChatTitle] = title
 	}
+	c.enrichMessageChannelMetadata(ctx, message, metadata)
 	placeholderKey := message.MessageID
 	if placeholderKey == "" {
 		placeholderKey = message.ID
@@ -822,7 +860,7 @@ func (c *Channel) handleMessage(message *mezonsdk.ChannelMessage) {
 		metadata["local_key"] = localKey
 		metadata["topic_id"] = strings.TrimSpace(message.TopicID)
 	}
-	c.HandleAuthorizedMessage(message.SenderID, message.ChannelID, content, nil, metadata, peerKind)
+	c.HandleAuthorizedMessageMedia(message.SenderID, message.ChannelID, content, mediaFiles, metadata, peerKind)
 	if !direct {
 		c.GroupHistory().Clear(historyKey)
 	}

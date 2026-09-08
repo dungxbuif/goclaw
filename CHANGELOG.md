@@ -16,6 +16,14 @@ All notable changes to GoClaw are documented here. For full documentation, see [
 
 ### Added
 
+- **Mezon context and rich-message parity** — Normal Mezon turns now include
+  referenced-message context, server-backed topic history, bounded inbound
+  attachments with MIME/filename preservation, and channel/category metadata
+  for passive memory extraction. Outbound text carries native Mezon markdown
+  spans, and HTTPS media URLs are delivered as native attachments. Local-file
+  uploads remain an explicit unsupported case until the SDK exposes a verified
+  upload transport.
+
 - **Scoped Discord/Mezon channel catalog** — Adds the read-only
   `channel_catalog` tool for listing and exactly resolving channels within the
   current inbound guild or clan. Results include hierarchy, kind, and

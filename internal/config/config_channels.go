@@ -85,6 +85,7 @@ type MezonConfig struct {
 	GroupPolicy    string              `json:"group_policy,omitempty"`
 	RequireMention *bool               `json:"require_mention,omitempty"`
 	HistoryLimit   int                 `json:"history_limit,omitempty"`
+	MediaMaxBytes  int64               `json:"media_max_bytes,omitempty"`
 	BlockReply     *bool               `json:"block_reply,omitempty"`
 	ChatBehavior   *ChatBehaviorConfig `json:"chat_behavior,omitempty"`
 }

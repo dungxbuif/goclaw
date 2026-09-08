@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
+	"github.com/nextlevelbuilder/goclaw/internal/channelmemory"
 	"github.com/nextlevelbuilder/goclaw/internal/channels"
 	"github.com/nextlevelbuilder/goclaw/internal/config"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
@@ -35,6 +38,64 @@ type fakeSDKClient struct {
 	interactive        []channels.InteractiveMessage
 	interactiveTopics  []string
 	interactionSources map[string]sdkInteractionSource
+	history            []*mezonsdk.ChannelMessage
+	historyRequests    []fakeHistoryRequest
+	richSent           []fakeRichSend
+}
+
+type contextSDKClient struct {
+	*fakeSDKClient
+	entries map[string]sdkCatalogEntry
+}
+
+func (f *contextSDKClient) ResolveChannel(_ context.Context, id string) (sdkCatalogEntry, error) {
+	entry, ok := f.entries[id]
+	if !ok {
+		return sdkCatalogEntry{}, errors.New("not found")
+	}
+	return entry, nil
+}
+
+func TestResolveMemoryExtractionContextIncludesMezonTopicParent(t *testing.T) {
+	client := &contextSDKClient{fakeSDKClient: &fakeSDKClient{}, entries: map[string]sdkCatalogEntry{
+		"channel-1": {ChannelID: "channel-1", Name: "support", CategoryID: "cat-1", CategoryName: "Operations"},
+	}}
+	channel := newWithClient(testMezonConfig(), bus.New(), nil, nil, client)
+	channel.SetName("mezon-prod")
+	got, err := channel.ResolveMemoryExtractionContext(context.Background(), &store.ChannelInstanceData{Name: "mezon-prod"}, store.PendingMessageGroup{ChannelName: "mezon-prod", HistoryKey: "channel-1:thread:topic-7"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := channelmemory.ExtractionContext{Platform: channels.TypeMezon, ChannelInstance: "mezon-prod", HistoryKey: "channel-1:thread:topic-7", ChannelID: "channel-1", ChannelName: "support", CategoryID: "cat-1", CategoryName: "Operations"}
+	if got != want {
+		t.Fatalf("context = %+v, want %+v", got, want)
+	}
+}
+
+type fakeHistoryRequest struct {
+	clanID, channelID, beforeID, topicID string
+	limit                                int32
+}
+type fakeRichSend struct {
+	channelID          string
+	content            mezonsdk.Content
+	attachments        []mezonsdk.Attachment
+	topicID, replyToID string
+}
+
+func (f *fakeSDKClient) ListChannelMessages(_ context.Context, clanID, channelID, beforeID, topicID string, limit int32) ([]*mezonsdk.ChannelMessage, error) {
+	f.historyRequests = append(f.historyRequests, fakeHistoryRequest{clanID, channelID, beforeID, topicID, limit})
+	return append([]*mezonsdk.ChannelMessage(nil), f.history...), nil
+}
+
+func (f *fakeSDKClient) SendContent(_ context.Context, channelID string, content mezonsdk.Content, attachments []mezonsdk.Attachment, topicID, replyToID string) (string, error) {
+	text := ""
+	if payload, ok := content.(map[string]any); ok {
+		text, _ = payload["t"].(string)
+	}
+	f.richSent = append(f.richSent, fakeRichSend{channelID, content, append([]mezonsdk.Attachment(nil), attachments...), topicID, replyToID})
+	f.sent = append(f.sent, fakeSDKSend{channelID: channelID, content: text, topicID: topicID, replyToID: replyToID})
+	return "rich-message", nil
 }
 
 type fakeSDKReaction struct{ channelID, messageID, emoji string }
@@ -297,6 +358,23 @@ func TestGroupMessageCarriesMezonChannelTitle(t *testing.T) {
 	}
 }
 
+func TestGroupMessageResolvesClanChannelAndCategoryNames(t *testing.T) {
+	mb := bus.New()
+	client := &contextSDKClient{fakeSDKClient: &fakeSDKClient{}, entries: map[string]sdkCatalogEntry{"channel-1": {ClanName: "Production", ChannelID: "channel-1", Name: "release-control", CategoryID: "cat-1", CategoryName: "Operations"}}}
+	channel := newWithClient(testMezonConfig(), mb, nil, nil, client)
+	if err := channel.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = channel.Stop(context.Background()) })
+	client.emit(&mezonsdk.ChannelMessage{MessageID: "message-1", ChannelID: "channel-1", ClanID: "clan-1", SenderID: "user-1", Username: "alice", Content: []byte(`{"t":"hello"}`), Mode: int32(mezonsdk.StreamModeChannel), Mentions: []mezonsdk.Mention{{UserID: "bot-1"}}})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	inbound, ok := mb.ConsumeInbound(ctx)
+	if !ok || inbound.Metadata[tools.MetaChatTitle] != "Production / release-control" || inbound.Metadata["category_name"] != "Operations" {
+		t.Fatalf("inbound = %#v", inbound)
+	}
+}
+
 type tenantCapturePendingStore struct{ tenant uuid.UUID }
 
 func (s *tenantCapturePendingStore) AppendBatch(ctx context.Context, _ []store.PendingMessage) error {
@@ -536,6 +614,121 @@ func TestInboundPublishesResolvedDisplayNameForContactPersistence(t *testing.T) 
 	}
 	if got.Metadata["display_name"] != "Alice Nguyen" {
 		t.Fatalf("display_name metadata = %q, want %q", got.Metadata["display_name"], "Alice Nguyen")
+	}
+}
+
+func TestInboundIncludesReferencedMessageContext(t *testing.T) {
+	client := &fakeSDKClient{}
+	msgBus := bus.New()
+	channel := newWithClient(config.MezonConfig{BotID: "bot-1", Token: "token", DMPolicy: "open"}, msgBus, nil, nil, client)
+	if err := channel.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = channel.Stop(context.Background()) })
+	client.emit(&mezonsdk.ChannelMessage{
+		MessageID: "message-2", ChannelID: "dm-1", ClanID: "0", SenderID: "user-1", Username: "alice",
+		Content: []byte(`{"t":"my answer"}`), Mode: int32(mezonsdk.StreamModeDM),
+		References: []mezonsdk.MessageRef{{MessageRefID: "message-1", MessageSenderDisplayName: "Bob", Content: `{"t":"original question"}`}},
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	got, ok := msgBus.ConsumeInbound(ctx)
+	if !ok || !strings.Contains(got.Content, "[Replying to Bob]") || !strings.Contains(got.Content, "original question") || !strings.Contains(got.Content, "my answer") {
+		t.Fatalf("inbound = %#v", got)
+	}
+}
+
+func TestInboundDownloadsAttachmentAndPreservesMetadata(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("image")) }))
+	defer srv.Close()
+	client := &fakeSDKClient{}
+	msgBus := bus.New()
+	channel := newWithClient(config.MezonConfig{BotID: "bot-1", Token: "token", DMPolicy: "open", MediaMaxBytes: 1024}, msgBus, nil, nil, client)
+	if err := channel.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = channel.Stop(context.Background()) })
+	client.emit(&mezonsdk.ChannelMessage{MessageID: "message-file", ChannelID: "dm-1", ClanID: "0", SenderID: "user-1", Content: []byte(`{"t":"inspect"}`), Mode: int32(mezonsdk.StreamModeDM), Attachments: []mezonsdk.Attachment{{Filename: "screen.png", Filetype: "image/png", URL: srv.URL + "/screen.png", Size: 5}}})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	got, ok := msgBus.ConsumeInbound(ctx)
+	if !ok || len(got.Media) != 1 || got.Media[0].Filename != "screen.png" || got.Media[0].MimeType != "image/png" || !strings.Contains(got.Content, "<media:image") {
+		t.Fatalf("inbound = %#v", got)
+	}
+}
+
+func TestUnmentionedGroupDoesNotDownloadAttachment(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { hits++; _, _ = w.Write([]byte("image")) }))
+	defer srv.Close()
+	requireMention := true
+	client := &fakeSDKClient{}
+	msgBus := bus.New()
+	channel := newWithClient(config.MezonConfig{BotID: "bot-1", Token: "token", GroupPolicy: "open", RequireMention: &requireMention}, msgBus, nil, nil, client)
+	if err := channel.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = channel.Stop(context.Background()) })
+	client.emit(&mezonsdk.ChannelMessage{MessageID: "message-file", ChannelID: "channel-1", ClanID: "clan-1", SenderID: "user-1", Content: []byte(`{"t":"background"}`), Mode: int32(mezonsdk.StreamModeChannel), Attachments: []mezonsdk.Attachment{{Filename: "screen.png", URL: srv.URL + "/screen.png"}}})
+	if hits != 0 {
+		t.Fatalf("attachment downloads = %d, want 0", hits)
+	}
+}
+
+func TestTopicMentionBackfillsServerHistory(t *testing.T) {
+	client := &fakeSDKClient{history: []*mezonsdk.ChannelMessage{
+		{MessageID: "old-2", SenderID: "user-2", DisplayName: "Bob", Content: []byte(`{"t":"second"}`)},
+		{MessageID: "old-1", SenderID: "user-1", DisplayName: "Alice", Content: []byte(`{"t":"first"}`)},
+		{MessageID: "bot-old", SenderID: "bot-1", Content: []byte(`{"t":"ignore bot"}`)},
+	}}
+	msgBus := bus.New()
+	requireMention := true
+	channel := newWithClient(config.MezonConfig{BotID: "bot-1", Token: "token", GroupPolicy: "open", RequireMention: &requireMention, HistoryLimit: 20}, msgBus, nil, nil, client)
+	if err := channel.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = channel.Stop(context.Background()) })
+	client.emit(&mezonsdk.ChannelMessage{MessageID: "current", ChannelID: "channel-1", ClanID: "clan-1", TopicID: "topic-7", SenderID: "user-3", Username: "carol", Content: []byte(`{"t":"@bot summarize"}`), Mentions: []mezonsdk.Mention{{UserID: "bot-1"}}, Mode: int32(mezonsdk.StreamModeChannel)})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	got, ok := msgBus.ConsumeInbound(ctx)
+	if !ok || !strings.Contains(got.Content, "Mezon topic messages") || strings.Index(got.Content, "Alice: first") > strings.Index(got.Content, "Bob: second") || strings.Contains(got.Content, "ignore bot") {
+		t.Fatalf("content = %q", got.Content)
+	}
+	if len(client.historyRequests) != 1 || client.historyRequests[0].topicID != "topic-7" || client.historyRequests[0].beforeID != "current" {
+		t.Fatalf("history requests = %#v", client.historyRequests)
+	}
+}
+
+func TestSendUsesNativeMarkdownAndURLAttachments(t *testing.T) {
+	client := &fakeSDKClient{channelClans: map[string]string{"channel-1": "clan-1"}}
+	channel := newWithClient(testMezonConfig(), bus.New(), nil, nil, client)
+	channel.SetRunning(true)
+	err := channel.Send(context.Background(), bus.OutboundMessage{ChatID: "channel-1", Content: "**Deploy** with `go test`", Media: []bus.MediaAttachment{{URL: "https://cdn.example/result.png", ContentType: "image/png"}}, Metadata: map[string]string{bus.MetaSourceContainerID: "clan-1", "group_id": "channel-1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(client.richSent) != 1 {
+		t.Fatalf("rich sends = %#v", client.richSent)
+	}
+	payload, ok := client.richSent[0].content.(map[string]any)
+	if !ok || payload["t"] != "Deploy with go test" {
+		t.Fatalf("payload = %#v", client.richSent[0].content)
+	}
+	spans, _ := payload["mk"].([]map[string]any)
+	if len(spans) != 2 || len(client.richSent[0].attachments) != 1 || client.richSent[0].attachments[0].URL != "https://cdn.example/result.png" {
+		t.Fatalf("spans=%#v attachments=%#v", spans, client.richSent[0].attachments)
+	}
+}
+
+func TestMezonMarkdownUsesUTF16OffsetsAndStripsMarkers(t *testing.T) {
+	payload := mezonMarkdownContent("😀 **bold** then [docs](https://example.com)").(map[string]any)
+	if payload["t"] != "😀 bold then docs (https://example.com)" {
+		t.Fatalf("text = %q", payload["t"])
+	}
+	spans := payload["mk"].([]map[string]any)
+	if len(spans) != 2 || spans[0]["type"] != "b" || spans[0]["s"] != 3 || spans[0]["e"] != 7 || spans[1]["type"] != "lk" {
+		t.Fatalf("spans = %#v", spans)
 	}
 }
 

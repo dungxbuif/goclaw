@@ -23,7 +23,8 @@ existing channel-instance store:
     "dm_policy": "disabled",
     "group_policy": "open",
     "require_mention": true,
-    "history_limit": 200
+    "history_limit": 200,
+    "media_max_bytes": 20971520
   },
   "enabled": true
 }
@@ -45,7 +46,8 @@ use the SDK defaults and TLS verification.
       dm_policy: "disabled",
       group_policy: "open",
       require_mention: true,
-      history_limit: 200
+      history_limit: 200,
+      media_max_bytes: 20971520
     }
   }
 }
@@ -62,9 +64,17 @@ responses and removed by secret-stripping paths; the bot ID is not secret.
 - DM/group policies use the common allowlist and pairing service.
 - Groups require a bot mention by default. Unmentioned messages are retained in
   pending history and supplied when a later message mentions the bot.
+- Replies include the referenced author's name and a bounded copy of the
+  referenced text. Topic mentions also backfill up to 25 older server messages,
+  in chronological order, so context survives restarts and missed events.
+- Inbound attachments are downloaded with a configurable size bound (20 MiB by
+  default), preserving MIME type and original filename. Text documents are
+  extracted into context; other files remain available to downstream media tools.
 - Tenant ID, agent ID, sender/user ID, clan ID, channel ID, and message ID are
   preserved for routing and isolation.
-- Long Markdown responses are split before the SDK's 8,000 UTF-16-unit limit.
+- Ordinary responses carry Mezon-native markdown spans for bold, inline/fenced
+  code, and links. Long responses are split before the SDK's 8,000 UTF-16-unit
+  wire limit using the real rich payload size.
 - Shutdown unregisters the event callback, stops history flushing, cancels login,
   and closes the SDK client exactly once.
 
@@ -157,10 +167,12 @@ after a process restart because source-message state is recovered from the SDK
 cache/API. Events from DMs, unknown channels, other bots, or the bot itself are
 dropped.
 
-Normal inbound messages publish the Mezon channel label as `chat_title`; rich
-component callbacks publish `clan / channel` when both names are available.
+Normal inbound messages and rich component callbacks publish `clan / channel`
+as `chat_title` when both names are available, with channel-label fallback.
 DB-backed pending group history receives the channel instance tenant before the
 flusher starts, so unmentioned clan context is isolated and survives restarts.
+Passive memory extraction resolves a topic history key back to its real channel,
+category, and parent metadata instead of storing an unnamed Mezon context.
 
 ## Cron permissions in clan channels
 
@@ -179,11 +191,10 @@ to the clan or other channels.
 
 ## Current limitations
 
-Text is production-supported. GoClaw does not advertise Mezon as media-capable
-because the current SDK has attachment metadata but no complete upload transport
-for local agent files. A media send returns `channels.ErrMediaUnsupported`, so
-existing API fallback policy can reject it or degrade explicitly instead of
-silently dropping files.
+Text and inbound media are production-supported. Outbound HTTPS media URLs are
+sent as native Mezon attachments. Local agent files still return
+`channels.ErrMediaUnsupported` because the SDK does not yet expose a verified
+upload transport; files are never silently dropped.
 
 Mezon's platform and SDK may expose additional APIs, but the bot is instructed
 from the adapter capability matrix, not from assumptions about Discord or

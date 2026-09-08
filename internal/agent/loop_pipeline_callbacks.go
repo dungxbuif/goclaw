@@ -374,7 +374,22 @@ func (l *Loop) makeCallLLM(req *RunRequest, emitRun func(AgentEvent)) func(ctx c
 		// retrying...") instead of a silent failure ending in a 💔 reaction. The
 		// providers' internal RetryDo / codex loops fire this hook before each retry
 		// attempt; the channel layer turns run.retrying into a placeholder update.
-		ctx = providers.WithRetryHook(ctx, func(attempt, maxAttempts int, _ error) {
+		retryClassifier := providers.NewDefaultClassifier()
+		ctx = providers.WithRetryHook(ctx, func(attempt, maxAttempts int, retryErr error) {
+			classification := providers.ClassifyHTTPError(retryClassifier, retryErr)
+			reason := string(classification.Reason)
+			if classification.Kind == "context_overflow" {
+				reason = "context_overflow"
+			}
+			slog.Warn("provider request retry",
+				"provider", provider.Name(), "model", model,
+				"attempt", attempt, "max_attempts", maxAttempts, "reason", reason,
+			)
+			// A single 300ms retry/short retry commonly recovers before a human can
+			// read the placeholder. Surface only persistent trouble.
+			if attempt < 2 {
+				return
+			}
 			emitRun(AgentEvent{
 				Type:    protocol.AgentEventRunRetrying,
 				AgentID: l.id,
@@ -382,6 +397,7 @@ func (l *Loop) makeCallLLM(req *RunRequest, emitRun func(AgentEvent)) func(ctx c
 				Payload: map[string]string{
 					"attempt":     strconv.Itoa(attempt),
 					"maxAttempts": strconv.Itoa(maxAttempts),
+					"reason":      reason,
 				},
 			})
 		})

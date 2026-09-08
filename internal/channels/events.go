@@ -391,7 +391,7 @@ func (m *Manager) HandleAgentEvent(eventType, runID string, payload any) {
 	if eventType == protocol.AgentEventRunRetrying {
 		attempt := extractPayloadString(payload, "attempt")
 		maxAttempts := extractPayloadString(payload, "maxAttempts")
-		retryMsg := fmt.Sprintf("Provider busy, retrying... (%s/%s)", attempt, maxAttempts)
+		retryMsg := retryStatusMessage(extractPayloadString(payload, "reason"), attempt, maxAttempts)
 		m.bus.PublishOutbound(bus.OutboundMessage{
 			Channel:  rc.ChannelName,
 			ChatID:   rc.ChatID,
@@ -463,6 +463,23 @@ func (m *Manager) HandleAgentEvent(eventType, runID string, payload any) {
 		stopReasoningBubbleTimerLocked(rc)
 		rc.mu.Unlock()
 	}
+}
+
+func retryStatusMessage(reason, attempt, maxAttempts string) string {
+	status := "The AI provider had a transient problem"
+	switch reason {
+	case "rate_limit":
+		status = "The AI provider reached its rate limit"
+	case "overloaded":
+		status = "The AI provider is temporarily overloaded"
+	case "timeout":
+		status = "The AI provider request timed out"
+	case "server_error":
+		status = "The AI provider returned a temporary error"
+	case "context_overflow":
+		status = "The conversation context exceeded the provider limit"
+	}
+	return fmt.Sprintf("%s; retrying... (%s/%s)", status, attempt, maxAttempts)
 }
 
 func (m *Manager) scheduleQuickAck(rc *RunContext) {

@@ -251,6 +251,16 @@ flowchart TD
     WAIT -->|No| CALL
 ```
 
+### User-visible retry status
+
+The first retry is treated as a short transport recovery and is not shown to
+the user. If a second retry is needed, the provider error classifier supplies a
+safe reason (`rate_limit`, `overloaded`, `timeout`, `server_error`, or
+`context_overflow`) to the run event. Channel placeholders describe that reason
+instead of labeling every retry as provider overload. Each retry is also logged
+with provider, model, attempt, and reason; raw upstream response bodies are not
+included in this warning.
+
 ---
 
 ## 6. Schema Cleaning

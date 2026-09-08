@@ -15,6 +15,20 @@ func TestClassifyHTTP429RateLimit(t *testing.T) {
 	}
 }
 
+func TestClassifyRetryablePlainTextRateLimit(t *testing.T) {
+	result := ClassifyHTTPError(NewDefaultClassifier(), errors.New("upstream rate limit reached; retry later"))
+	if result.Reason != FailoverRateLimit {
+		t.Errorf("expected FailoverRateLimit, got %s", result.Reason)
+	}
+}
+
+func TestClassifyRetryableProcessingFailureAsServerError(t *testing.T) {
+	result := ClassifyHTTPError(NewDefaultClassifier(), errors.New("response failed while processing your request; please retry"))
+	if result.Reason != FailoverServerError {
+		t.Errorf("expected FailoverServerError, got %s", result.Reason)
+	}
+}
+
 func TestClassifyHTTP402Billing(t *testing.T) {
 	classifier := NewDefaultClassifier()
 	result := classifier.Classify(nil, 402, "Payment required")

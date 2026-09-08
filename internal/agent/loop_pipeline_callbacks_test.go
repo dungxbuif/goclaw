@@ -60,14 +60,15 @@ func (s *recordingSessionStore) AddMessage(_ context.Context, _ string, msg prov
 // (which fires the injected retry hook), then succeeds — mimicking a flaky
 // provider whose internal RetryDo consumes the run's retry hook.
 type retryOnceProvider struct {
-	calls int
-	cfg   providers.RetryConfig
+	calls    int
+	failures int
+	cfg      providers.RetryConfig
 }
 
 func (p *retryOnceProvider) Chat(ctx context.Context, _ providers.ChatRequest) (*providers.ChatResponse, error) {
 	return providers.RetryDo(ctx, p.cfg, func() (*providers.ChatResponse, error) {
 		p.calls++
-		if p.calls == 1 {
+		if p.calls <= p.failures {
 			return nil, &providers.HTTPError{Status: 429, Body: "rate limited"}
 		}
 		return &providers.ChatResponse{Content: "ok"}, nil
@@ -81,13 +82,14 @@ func (p *retryOnceProvider) ChatStream(ctx context.Context, _ providers.ChatRequ
 func (p *retryOnceProvider) DefaultModel() string { return "test-model" }
 func (p *retryOnceProvider) Name() string         { return "test-provider" }
 
-func TestMakeCallLLMEmitsRetryingOnTransientProviderError(t *testing.T) {
+func TestMakeCallLLMHidesRetryThatImmediatelyRecovers(t *testing.T) {
 	col := &eventCollector{}
 	loop := &Loop{id: "test-agent", onEvent: col.onEvent}
 	req := &RunRequest{RunID: "run-1", SessionKey: "sess-1", Channel: "telegram"}
 	state := &pipeline.RunState{
 		Provider: &retryOnceProvider{
-			cfg: providers.RetryConfig{Attempts: 2, MinDelay: time.Millisecond, MaxDelay: time.Millisecond},
+			failures: 1,
+			cfg:      providers.RetryConfig{Attempts: 2, MinDelay: time.Millisecond, MaxDelay: time.Millisecond},
 		},
 		Model:     "test-model",
 		Iteration: 0,
@@ -102,12 +104,30 @@ func TestMakeCallLLMEmitsRetryingOnTransientProviderError(t *testing.T) {
 	}
 
 	retrying := col.filter(protocol.AgentEventRunRetrying)
+	if len(retrying) != 0 {
+		t.Fatalf("retrying events = %+v, want a recovered first retry to stay silent", retrying)
+	}
+}
+
+func TestMakeCallLLMSurfacesPersistentRetryWithClassifiedReason(t *testing.T) {
+	col := &eventCollector{}
+	loop := &Loop{id: "test-agent", onEvent: col.onEvent}
+	req := &RunRequest{RunID: "run-1", SessionKey: "sess-1", Channel: "mezon"}
+	state := &pipeline.RunState{Provider: &retryOnceProvider{
+		failures: 2,
+		cfg:      providers.RetryConfig{Attempts: 3, MinDelay: time.Millisecond, MaxDelay: time.Millisecond},
+	}, Model: "test-model"}
+	resp, err := loop.makeCallLLM(req, col.onEvent)(context.Background(), state, providers.ChatRequest{})
+	if err != nil || resp == nil || resp.Content != "ok" {
+		t.Fatalf("response = %+v, error = %v", resp, err)
+	}
+	retrying := col.filter(protocol.AgentEventRunRetrying)
 	if len(retrying) != 1 {
-		t.Fatalf("retrying events = %+v, want exactly one", retrying)
+		t.Fatalf("retrying events = %+v, want exactly one after the second failure", retrying)
 	}
 	payload, ok := retrying[0].Payload.(map[string]string)
-	if !ok || payload["attempt"] != "1" || payload["maxAttempts"] != "2" {
-		t.Fatalf("retrying payload = %+v, want attempt=1 maxAttempts=2", retrying[0].Payload)
+	if !ok || payload["attempt"] != "2" || payload["maxAttempts"] != "3" || payload["reason"] != "rate_limit" {
+		t.Fatalf("retrying payload = %+v", retrying[0].Payload)
 	}
 }
 

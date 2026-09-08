@@ -6,6 +6,15 @@ Significant changes, features, and fixes in reverse chronological order.
 
 ## 2026-09-08
 
+### Provider retry status accuracy
+
+**Fixes**
+
+- Suppressed user-visible status for a first retry that immediately recovers.
+- Classified persistent retries as rate limit, overload, timeout, context
+  overflow, or server error instead of reporting every cause as provider busy.
+- Added structured retry warnings without logging raw provider response bodies.
+
 ### Mezon context continuity and operational hardening
 
 **Fixes**

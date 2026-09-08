@@ -115,6 +115,20 @@ func (c *DefaultClassifier) Classify(err error, statusCode int, body string) Fai
 	if isContentPolicyRefusal(lower, statusCode) {
 		return classifyReason(FailoverContentPolicy)
 	}
+	// Some OpenAI-compatible and streaming transports return retry guidance as
+	// plain errors without preserving an HTTP status. Keep these categories in
+	// sync with IsRetryableError so retry telemetry never degrades to "unknown".
+	if statusCode == 0 {
+		switch {
+		case containsAny(lower, "rate limit", "too many requests", "retry after", "http 429"):
+			return classifyReason(FailoverRateLimit)
+		case containsAny(lower, "overloaded", "overload", "insufficient capacity"):
+			return classifyReason(FailoverOverloaded)
+		case strings.Contains(lower, "response failed") && strings.Contains(lower, "retry"),
+			strings.Contains(lower, "while processing your request"):
+			return classifyReason(FailoverServerError)
+		}
+	}
 
 	// Provider-specific patterns
 	for _, patterns := range c.providerPatterns {

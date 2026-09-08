@@ -100,6 +100,11 @@ All notable changes to GoClaw are documented here. For full documentation, see [
 
 ### Fixed
 
+- **Accurate provider retry status** — A retry that immediately recovers stays
+  silent. Persistent retries are classified as rate limit, overload, timeout,
+  context overflow, or temporary server error instead of always claiming the
+  provider is busy; structured logs retain the reason without exposing provider
+  response bodies.
 - **Mezon contextual interactions and cron administration** — Interactive
   callbacks now verify bot ownership, recover source-card text, preserve topic
   routing and channel names, and reject events emitted for another bot's card.

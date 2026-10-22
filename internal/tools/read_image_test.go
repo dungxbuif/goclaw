@@ -2,11 +2,36 @@ package tools
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/nextlevelbuilder/goclaw/internal/providers"
 )
+
+func TestReadImageLoadPathMapsUploadsAlias(t *testing.T) {
+	workspace := t.TempDir()
+	uploads := filepath.Join(workspace, ".uploads")
+	if err := os.MkdirAll(uploads, 0o755); err != nil {
+		t.Fatalf("create uploads directory: %v", err)
+	}
+	const imageData = "test-image"
+	if err := os.WriteFile(filepath.Join(uploads, "receipt.jpg"), []byte(imageData), 0o600); err != nil {
+		t.Fatalf("write staged image: %v", err)
+	}
+
+	images, err := NewReadImageTool(nil).loadImageFromPath(
+		WithToolWorkspace(context.Background(), workspace),
+		"/uploads/receipt.jpg",
+	)
+	if err != nil {
+		t.Fatalf("load /uploads alias: %v", err)
+	}
+	if len(images) != 1 || images[0].MimeType != "image/jpeg" || images[0].Data == "" {
+		t.Fatalf("unexpected image content: %#v", images)
+	}
+}
 
 func TestReadImage_BothPathAndUrl_Error(t *testing.T) {
 	tool := NewReadImageTool(nil)

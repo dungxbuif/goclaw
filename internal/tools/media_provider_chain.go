@@ -209,6 +209,9 @@ func ExecuteWithChain(
 
 			data, usage, callErr := fn(timeoutCtx, cp, entry.Provider, entry.Model, callParams)
 			cancel()
+			if callErr == nil && len(data) == 0 {
+				callErr = fmt.Errorf("provider %q returned an empty response", entry.Provider)
+			}
 
 			if callErr == nil {
 				return &ChainResult{

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -273,6 +274,8 @@ func (t *ReadImageTool) callProvider(ctx context.Context, cp credentialProvider,
 
 // loadImageFromPath reads an image file from the workspace and returns it as ImageContent.
 func (t *ReadImageTool) loadImageFromPath(ctx context.Context, path string) ([]providers.ImageContent, error) {
+	path = normalizeImageUploadAlias(path)
+
 	// Infer MIME type from extension
 	ext := strings.ToLower(filepath.Ext(path))
 	mimeTypes := map[string]string{
@@ -308,4 +311,16 @@ func (t *ReadImageTool) loadImageFromPath(ctx context.Context, path string) ([]p
 		MimeType: mime,
 		Data:     base64.StdEncoding.EncodeToString(data),
 	}}, nil
+}
+
+// normalizeImageUploadAlias translates the documented channel-upload alias
+// (/uploads/name.jpg) into its workspace-relative staging location
+// (.uploads/name.jpg). The final resolver still enforces workspace confinement;
+// cleaning before the prefix check means traversal attempts are never mapped.
+func normalizeImageUploadAlias(raw string) string {
+	cleaned := path.Clean(strings.ReplaceAll(strings.TrimSpace(raw), "\\", "/"))
+	if strings.HasPrefix(cleaned, "/uploads/") {
+		return ".uploads/" + strings.TrimPrefix(cleaned, "/uploads/")
+	}
+	return raw
 }

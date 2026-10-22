@@ -219,6 +219,31 @@ func TestParamsInjection(t *testing.T) {
 	}
 }
 
+func TestExecuteWithChainEmptyDataFallsBackToNextProvider(t *testing.T) {
+	reg := providers.NewRegistry(nil)
+	reg.Register(&fakeNonCodexProvider{name: "empty"})
+	reg.Register(&fakeNonCodexProvider{name: "fallback"})
+	chain := []MediaProviderEntry{
+		{Provider: "empty", Model: "vision-a", Enabled: true, Timeout: 10, MaxRetries: 1},
+		{Provider: "fallback", Model: "vision-b", Enabled: true, Timeout: 10, MaxRetries: 1},
+	}
+
+	result, err := ExecuteWithChain(context.Background(), chain, reg,
+		func(_ context.Context, _ credentialProvider, providerName, _ string, _ map[string]any) ([]byte, *providers.Usage, error) {
+			if providerName == "empty" {
+				return nil, nil, nil
+			}
+			return []byte("receipt total: 500000"), nil, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("ExecuteWithChain returned error: %v", err)
+	}
+	if result.Provider != "fallback" || string(result.Data) != "receipt total: 500000" {
+		t.Fatalf("result = provider %q, data %q; want fallback provider output", result.Provider, result.Data)
+	}
+}
+
 // TestStrategyPassedThrough: verifies round_robin strategy is preserved in the
 // router by checking the router is created (strategy is opaque; tested indirectly
 // by confirming the router forms from round_robin vs priority_order inputs).
